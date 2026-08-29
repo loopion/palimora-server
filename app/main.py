@@ -700,18 +700,17 @@ def ai_suggest(page_id: str, payload: SuggestIn,
         db.commit()
         raise HTTPException(status_code=502, detail=f"Correction IA indisponible : {exc}")
     db.query(AISuggestion).filter_by(page_id=page.id, status="pending").delete()
-    out = []
-    for s in suggestions:
-        row = AISuggestion(
-            page_id=page.id, transcription_id=transcription.id,
-            original_text=s["originalText"], suggested_text=s["suggestedText"],
-            explanation=s["explanation"], confidence=s["confidenceScore"],
-            status="pending", model=settings.openai_model,
-        )
-        db.add(row)
-        out.append({"id": row.id, "original_text": row.original_text,
-                    "suggested_text": row.suggested_text, "explanation": row.explanation,
-                    "confidence": row.confidence, "status": row.status})
+    rows = [AISuggestion(
+        page_id=page.id, transcription_id=transcription.id,
+        original_text=s["originalText"], suggested_text=s["suggestedText"],
+        explanation=s["explanation"], confidence=s["confidenceScore"],
+        status="pending", model=settings.openai_model,
+    ) for s in suggestions]
+    db.add_all(rows)
+    db.flush()  # ids must exist before returning them to the client
+    out = [{"id": r.id, "original_text": r.original_text,
+            "suggested_text": r.suggested_text, "explanation": r.explanation,
+            "confidence": r.confidence, "status": r.status} for r in rows]
     db.commit()
     return {"suggestions": out, "balance": user.credit_balance}
 
