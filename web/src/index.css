@@ -6,3 +6,16 @@ body { @apply bg-slate-100 text-slate-900; font-family: system-ui, -apple-system
 /* thin scrollbars inside panels */
 .thin-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
 .thin-scroll::-webkit-scrollbar-thumb { @apply bg-slate-300 rounded; }
+
+/* OpenSeadragon segment overlays */
+.seg-overlay {
+  border: 1.5px solid rgba(99, 102, 241, 0.55);
+  background: rgba(99, 102, 241, 0.08);
+  pointer-events: none;
+}
+.seg-overlay.seg-active {
+  border: 2px solid rgba(217, 70, 239, 0.9);
+  background: rgba(217, 70, 239, 0.15);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.35);
+}
+.osd-host { background: #1e293b; }

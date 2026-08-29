@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import OpenSeadragon from 'openseadragon'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, getToken, Me, PageDetail, PageSummary, QueueItem, Segment, setToken } from '../api'
 
@@ -16,6 +17,15 @@ function confColor(c: number) {
   return 'border-red-400 bg-red-50'
 }
 
+interface SearchHit {
+  document_id: string
+  document_title: string
+  page_id: string
+  page_number: number
+  segment_id: string
+  snippet: string
+}
+
 export default function Station() {
   const [me, setMe] = useState<Me | null>(null)
   const [queue, setQueue] = useState<QueueItem[]>([])
@@ -23,8 +33,12 @@ export default function Station() {
   const [pages, setPages] = useState<PageSummary[]>([])
   const [pageId, setPageId] = useState<string | null>(null)
   const [page, setPage] = useState<PageDetail | null>(null)
+  const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null)
   const [busy, setBusy] = useState('')
   const [toast, setToast] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchHits, setSearchHits] = useState<SearchHit[] | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
 
   const notify = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3500) }
@@ -46,8 +60,9 @@ export default function Station() {
     setPages(data.pages)
   }, [])
 
-  const loadPage = useCallback(async (id: string) => {
+  const loadPage = useCallback(async (id: string, segmentId?: string) => {
     setPageId(id)
+    setActiveSegmentId(segmentId ?? null)
     const data = await api.get<PageDetail>(`/api/pages/${id}`)
     setPage(data)
   }, [])
@@ -56,7 +71,49 @@ export default function Station() {
     setDocId(id)
     setPage(null)
     setPageId(null)
+    setActiveSegmentId(null)
     await loadPages(id)
+  }
+
+  // ---- keyboard shortcuts
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+      const idx = pages.findIndex((p) => p.id === pageId)
+      if (e.key === 'ArrowRight' && idx < pages.length - 1) {
+        loadPage(pages[idx + 1].id)
+      } else if (e.key === 'ArrowLeft' && idx > 0) {
+        loadPage(pages[idx - 1].id)
+      } else if (e.key === 'v' && pageId) {
+        validatePage()
+      } else if (e.key === '/') {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  // ---- search
+  useEffect(() => {
+    if (searchQuery.trim().length < 2) { setSearchHits(null); return }
+    const t = setTimeout(async () => {
+      try {
+        const data = await api.get<{ results: SearchHit[] }>(
+          `/api/search?q=${encodeURIComponent(searchQuery.trim())}`)
+        setSearchHits(data.results)
+      } catch { setSearchHits(null) }
+    }, 250)
+    return () => clearTimeout(t)
+  }, [searchQuery])
+
+  async function openHit(hit: SearchHit) {
+    if (hit.document_id !== docId) await selectDoc(hit.document_id)
+    await loadPage(hit.page_id, hit.segment_id)
+    setSearchHits(null)
+    setSearchQuery('')
   }
 
   // ---- upload flow
@@ -68,11 +125,21 @@ export default function Station() {
       const pageIds: string[] = []
       for (const file of Array.from(files)) {
         const ct = file.type || 'application/octet-stream'
-        const up = await api.post<{ page_id: string; upload_url: string }>(
+        const up = await api.post<{ page_id: string; upload_url: string | null }>(
           `/api/documents/${docId}/pages/upload-url`, { content_type: ct, size_bytes: file.size })
-        const put = await fetch(up.upload_url, { method: 'PUT', body: file,
-          headers: { 'Content-Type': ct } })
-        if (!put.ok) throw new Error(`Échec upload ${file.name} (${put.status})`)
+        if (up.upload_url) {
+          const put = await fetch(up.upload_url, { method: 'PUT', body: file,
+            headers: { 'Content-Type': ct } })
+          if (!put.ok) throw new Error(`Echec upload ${file.name} (${put.status})`)
+        } else {
+          const form = new FormData()
+          form.append('file', file)
+          const posted = await fetch(`/api/pages/${up.page_id}/upload`, {
+            method: 'POST', body: form,
+            headers: { Authorization: `Bearer ${getToken()}` },
+          })
+          if (!posted.ok) throw new Error(`Echec upload ${file.name} (${posted.status})`)
+        }
         pageIds.push(up.page_id)
       }
       const res = await api.post<{ credits_charged: number }>(
@@ -81,7 +148,7 @@ export default function Station() {
       await loadPages(docId)
       refreshQueue()
     } catch (err: any) {
-      notify(err.message || 'Échec de l’upload')
+      notify(err.message || 'Echec de l’upload')
     } finally {
       setBusy('')
       if (fileInput.current) fileInput.current.value = ''
@@ -154,22 +221,44 @@ export default function Station() {
     notify('Document validé')
   }
 
+  function onSegmentClick(seg: Segment) {
+    setActiveSegmentId(seg.id)
+    document.getElementById(`seg-${seg.id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }
+
   return (
     <div className="h-screen flex flex-col">
-      {/* top bar */}
-      <header className="bg-white border-b px-4 py-2 flex items-center gap-3">
+      <header className="bg-white border-b px-4 py-2 flex items-center gap-3 relative">
         <span className="text-xl font-semibold">📜 Palimora</span>
         <span className="text-sm bg-indigo-50 text-indigo-700 rounded-full px-3 py-1">
           {me ? `${me.credit_balance} crédits` : '…'}
         </span>
+        <div className="flex-1 max-w-md relative">
+          <input ref={searchInputRef}
+                 className="w-full border rounded-lg px-3 py-1.5 text-sm"
+                 placeholder="Rechercher dans les transcriptions… ( / )"
+                 value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+          {searchHits && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg max-h-80 overflow-y-auto thin-scroll z-50">
+              {searchHits.length === 0 && <p className="p-3 text-sm text-slate-400">Aucun résultat.</p>}
+              {searchHits.map((h, i) => (
+                <button key={i} onClick={() => openHit(h)}
+                        className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b last:border-0">
+                  <p className="text-xs text-slate-500">{h.document_title} — page {h.page_number}</p>
+                  <p className="text-sm">…{h.snippet}…</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="flex-1" />
         {me?.is_admin && <Link className="text-sm text-slate-500 hover:text-slate-800" to="/admin">Admin</Link>}
         <button className="text-sm text-slate-500 hover:text-slate-800"
                 onClick={() => { setToken(null); navigate('/login') }}>Déconnexion</button>
       </header>
 
-      {/* ZONE 1 — queue (horizontal third) */}
-      <section className="bg-slate-50 border-b px-4 py-3" style={{ height: '33vh' }}>
+      {/* ZONE 1 — queue */}
+      <section className="bg-slate-50 border-b px-4 py-3" style={{ height: '30vh' }}>
         <div className="flex items-center gap-2 mb-2">
           <h2 className="text-sm font-semibold text-slate-600">File de traitement</h2>
           <button onClick={newDocument}
@@ -216,9 +305,10 @@ export default function Station() {
         </div>
       </section>
 
-      {/* ZONES 2 & 3 — viewer / editor split */}
+      {/* ZONES 2 & 3 */}
       <main className="flex-1 flex min-h-0">
-        <Viewer page={page} pages={pages} onSelect={loadPage} />
+        <Viewer page={page} pages={pages} onSelect={loadPage} activeSegmentId={activeSegmentId}
+                onSegmentPick={onSegmentClick} />
         <section className="w-1/2 border-l flex flex-col min-h-0">
           {page ? (
             <>
@@ -244,7 +334,16 @@ export default function Station() {
                 <div className="flex-1 overflow-y-auto thin-scroll p-3 space-y-2">
                   {page.segments.length === 0 && <p className="text-sm text-slate-400">Aucun segment.</p>}
                   {page.segments.map((s) => (
-                    <SegmentRow key={s.id} seg={s} onSave={saveSegment} />
+                    <div key={s.id} id={`seg-${s.id}`}
+                         className={`border rounded-md px-2 py-1.5 flex items-start gap-2 cursor-pointer transition
+                                     ${activeSegmentId === s.id ? 'ring-2 ring-indigo-400 ' : ''}${confColor(s.confidence)}`}
+                         onClick={() => setActiveSegmentId(s.id)}>
+                      <span className="text-[10px] text-slate-500 w-8 pt-2 text-right">{Math.round(s.confidence * 100)}%</span>
+                      <SegmentInput seg={s} onSave={saveSegment} />
+                      <button className={`text-[10px] pt-1 ${s.is_validated ? 'text-emerald-600' : 'text-slate-300'}`}
+                              title="Valider la ligne"
+                              onClick={(e) => { e.stopPropagation(); saveSegment(s, s.edited_text || s.source_text, !s.is_validated) }}>✓</button>
+                    </div>
                   ))}
                 </div>
               ) : (
@@ -258,7 +357,6 @@ export default function Station() {
                 </div>
               )}
 
-              {/* AI suggestions */}
               <div className="border-t px-3 py-2 bg-white">
                 <div className="flex items-center gap-2">
                   <button onClick={aiSuggest} disabled={busy === 'ai'}
@@ -272,7 +370,7 @@ export default function Station() {
                   <div className="flex-1" />
                   <button onClick={validatePage}
                           className="text-xs bg-emerald-600 text-white rounded-md px-3 py-1.5">
-                    ✓ Valider la page
+                    ✓ Valider la page (V)
                   </button>
                 </div>
                 {page.suggestions.length > 0 && (
@@ -313,41 +411,47 @@ export default function Station() {
   )
 }
 
-function SegmentRow({ seg, onSave }: { seg: Segment; onSave: (s: Segment, t: string, v?: boolean) => void }) {
+function SegmentInput({ seg, onSave }: { seg: Segment; onSave: (s: Segment, t: string, v?: boolean) => void }) {
   const [text, setText] = useState(seg.edited_text || seg.source_text)
+  const [initial, setInitial] = useState(seg.edited_text || seg.source_text)
+  if ((seg.edited_text || seg.source_text) !== initial) {
+    setInitial(seg.edited_text || seg.source_text)
+    setText(seg.edited_text || seg.source_text)
+  }
   const dirty = text !== (seg.edited_text || seg.source_text)
   return (
-    <div className={`border rounded-md px-2 py-1.5 flex items-start gap-2 ${confColor(seg.confidence)}`}>
-      <span className="text-[10px] text-slate-500 w-8 pt-2 text-right">{Math.round(seg.confidence * 100)}%</span>
-      <input className="flex-1 bg-transparent text-sm outline-none"
-             value={text} onChange={(e) => setText(e.target.value)}
-             onBlur={() => dirty && onSave(seg, text)} />
-      <button className={`text-[10px] pt-1 ${seg.is_validated ? 'text-emerald-600' : 'text-slate-300'}`}
-              title="Valider la ligne"
-              onClick={() => onSave(seg, text, !seg.is_validated)}>✓</button>
-    </div>
+    <input className="flex-1 bg-transparent text-sm outline-none"
+           value={text} onChange={(e) => setText(e.target.value)}
+           onBlur={() => dirty && onSave(seg, text)} />
   )
 }
 
-function Viewer({ page, pages, onSelect }: {
-  page: PageDetail | null; pages: PageSummary[]; onSelect: (id: string) => void
+function Viewer({ page, pages, onSelect, activeSegmentId, onSegmentPick }: {
+  page: PageDetail | null
+  pages: PageSummary[]
+  onSelect: (id: string, segmentId?: string) => void
+  activeSegmentId: string | null
+  onSegmentPick: (seg: Segment) => void
 }) {
-  const [scale, setScale] = useState(1)
-  const [pos, setPos] = useState({ x: 0, y: 0 })
-  const [imgSrc, setImgSrc] = useState('')
-  const drag = useRef<{ x: number; y: number } | null>(null)
-  const frame = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const viewerRef = useRef<any>(null)
+  const pageRef = useRef<PageDetail | null>(null)
+  const [zoomLabel, setZoomLabel] = useState(100)
+  const [imageError, setImageError] = useState(false)
+  pageRef.current = page
 
+  const [imgSrc, setImgSrc] = useState('')
   useEffect(() => {
-    setScale(1); setPos({ x: 0, y: 0 }); setImgSrc('')
     let objectUrl = ''
+    setImgSrc('')
+    setImageError(false)
     const url = page?.image_url
     if (url) {
       if (url.startsWith('/api/')) {
         fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } })
           .then((r) => { if (!r.ok) throw new Error('image'); return r.blob() })
           .then((b) => { objectUrl = URL.createObjectURL(b); setImgSrc(objectUrl) })
-          .catch(() => setImgSrc(''))
+          .catch(() => setImageError(true))
       } else {
         setImgSrc(url)
       }
@@ -355,38 +459,85 @@ function Viewer({ page, pages, onSelect }: {
     return () => { if (objectUrl) URL.revokeObjectURL(objectUrl) }
   }, [page?.id, page?.image_url])
 
-  function onWheel(e: React.WheelEvent) {
-    e.preventDefault()
-    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
-    setScale((s) => Math.min(8, Math.max(0.2, s * factor)))
-  }
+  useEffect(() => {
+    if (!containerRef.current || viewerRef.current) return
+    const viewer = OpenSeadragon({
+      element: containerRef.current,
+      showNavigator: false,
+      showZoomControl: false,
+      showHomeControl: false,
+      showFullPageControl: false,
+      defaultZoomLevel: 0.9,
+      minZoomLevel: 0.2,
+      maxZoomLevel: 12,
+      visibilityRatio: 0.9,
+    })
+    viewer.addHandler('zoom', (e: any) => setZoomLabel(Math.round(e.zoom * 100)))
+    viewer.addHandler('canvas-click', (e: any) => {
+      if (e.quick && viewerRef.current) {
+        const vp = viewerRef.current.viewport.pointFromPixel(e.position)
+        const img = viewerRef.current.viewport.viewportToImageCoordinates(vp)
+        const segments = pageRef.current?.segments || []
+        for (const seg of segments) {
+          const box = bboxRect(seg.bbox)
+          if (box && img.x >= box[0] && img.x <= box[0] + box[2] && img.y >= box[1] && img.y <= box[1] + box[3]) {
+            onSegmentPick(seg)
+            return
+          }
+        }
+      }
+    })
+    viewerRef.current = viewer
+    return () => { viewer.destroy(); viewerRef.current = null }
+  }, [])
 
-  function onMouseDown(e: React.MouseEvent) {
-    drag.current = { x: e.clientX - pos.x, y: e.clientY - pos.y }
-  }
-  function onMouseMove(e: React.MouseEvent) {
-    if (!drag.current) return
-    setPos({ x: e.clientX - drag.current.x, y: e.clientY - drag.current.y })
-  }
-  function stop() { drag.current = null }
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer || !imgSrc) return
+    viewer.open({ type: 'image', url: imgSrc, buildPyramid: false })
+  }, [imgSrc])
+
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer || !page) return
+    const apply = () => {
+      viewer.clearOverlays()
+      for (const seg of page.segments) {
+        const box = bboxRect(seg.bbox)
+        if (!box) continue
+        const el = document.createElement('div')
+        el.className = 'seg-overlay' + (seg.id === activeSegmentId ? ' seg-active' : '')
+        const rect = viewer.viewport.imageToViewportRectangle(box[0], box[1], box[2], box[3])
+        viewer.addOverlay(el, rect)
+      }
+    }
+    if (viewer.world.getItemCount() > 0) apply()
+    else viewer.addOnceHandler('open', apply)
+  }, [page?.id, page?.segments, imgSrc, activeSegmentId])
+
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer || !activeSegmentId || !page || viewer.world.getItemCount() === 0) return
+    const seg = page.segments.find((s) => s.id === activeSegmentId)
+    const box = seg && bboxRect(seg.bbox)
+    if (box) {
+      const rect = viewer.viewport.imageToViewportRectangle(
+        box[0] - 30, box[1] - 30, box[2] + 60, box[3] + 60)
+      viewer.viewport.fitBounds(rect, true)
+    }
+  }, [activeSegmentId])
 
   return (
     <section className="w-1/2 flex flex-col min-h-0">
-      <div ref={frame} className="flex-1 overflow-hidden bg-slate-800 relative cursor-grab"
-           onWheel={onWheel} onMouseDown={onMouseDown}
-           onMouseMove={onMouseMove} onMouseUp={stop} onMouseLeave={stop}>
-        {imgSrc ? (
-          <img src={imgSrc} alt={`Page ${page?.page_number ?? ''}`}
-               draggable={false}
-               className="absolute origin-top-left select-none"
-               style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})` }} />
-        ) : (
-          <div className="h-full flex items-center justify-center text-slate-400 text-sm">
-            {page ? 'Image indisponible' : 'Aucune page sélectionnée'}
+      <div className="flex-1 relative bg-slate-800 min-h-0">
+        <div ref={containerRef} className="absolute inset-0 osd-host" />
+        {!imgSrc && (
+          <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm pointer-events-none">
+            {page ? (imageError ? 'Image indisponible' : 'Chargement…') : 'Aucune page sélectionnée'}
           </div>
         )}
-        <div className="absolute bottom-2 left-2 bg-black/50 text-white text-xs rounded px-2 py-1">
-          🔍 {Math.round(scale * 100)}%
+        <div className="absolute bottom-2 left-2 bg-black/50 text-white text-xs rounded px-2 py-1 pointer-events-none">
+          🔍 {zoomLabel}%
         </div>
       </div>
       <div className="h-20 bg-white border-t flex gap-2 p-2 overflow-x-auto thin-scroll">
@@ -403,6 +554,26 @@ function Viewer({ page, pages, onSelect }: {
       </div>
     </section>
   )
+}
+
+function bboxRect(bbox: any): [number, number, number, number] | null {
+  if (!bbox) return null
+  try {
+    if (bbox.type === 'bbox' && Array.isArray(bbox.box)) {
+      const [x0, y0, x1, y1] = bbox.box.map(Number)
+      return [Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)]
+    }
+    const poly: [number, number][] = bbox.type === 'baseline'
+      ? (bbox.baseline || []).map((p: any) => [Number(p[0]), Number(p[1])])
+      : (bbox.boundary || []).map((p: any) => [Number(p[0]), Number(p[1])])
+    if (!poly.length) return null
+    const xs = poly.map((p) => p[0])
+    const ys = poly.map((p) => p[1])
+    const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
+    return [minX, minY, maxX - minX, maxY - minY]
+  } catch {
+    return null
+  }
 }
 
 function StatusDot({ status }: { status: string }) {
