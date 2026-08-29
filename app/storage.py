@@ -24,7 +24,8 @@ def client():
             region_name=settings.s3_region,
             aws_access_key_id=settings.s3_access_key,
             aws_secret_access_key=settings.s3_secret_key,
-            config=BotoConfig(signature_version="s3v4"),
+            config=BotoConfig(signature_version="s3v4", connect_timeout=5, read_timeout=30,
+                              retries={"max_attempts": 2}),
         )
     return _client
 
