@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint,
+    JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -125,7 +125,7 @@ class Transcription(Base):
     edited_text: Mapped[str] = mapped_column(Text, default="")
     normalized_text: Mapped[str] = mapped_column(Text, default="")
     markdown_text: Mapped[str] = mapped_column(Text, default="")
-    confidence_score: Mapped[float] = mapped_column(Integer, default=0)  # stored x1000 as int? keep float
+    confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
     source: Mapped[str] = mapped_column(String(20), default="htr")  # htr | manual | ai
     version_number: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
@@ -144,7 +144,7 @@ class Segment(Base):
     type: Mapped[str] = mapped_column(String(20), default="line")
     source_text: Mapped[str] = mapped_column(Text, default="")
     edited_text: Mapped[str] = mapped_column(Text, default="")
-    confidence_score: Mapped[float] = mapped_column(Integer, default=0)
+    confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
     bbox_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     reading_order: Mapped[int] = mapped_column(Integer, default=0)
     is_uncertain: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -162,7 +162,7 @@ class AISuggestion(Base):
     original_text: Mapped[str] = mapped_column(Text, default="")
     suggested_text: Mapped[str] = mapped_column(Text, default="")
     explanation: Mapped[str] = mapped_column(Text, default="")
-    confidence: Mapped[float] = mapped_column(Integer, default=0)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|accepted|rejected
     model: Mapped[str] = mapped_column(String(80), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

@@ -37,6 +37,23 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(engine)
+    _migrate()
+
+
+def _migrate() -> None:
+    """Tiny in-place migrations for beta deployments (no Alembic yet)."""
+    from sqlalchemy import text
+    stmts = [
+        "ALTER TABLE transcriptions ALTER COLUMN confidence_score TYPE double precision",
+        "ALTER TABLE segments ALTER COLUMN confidence_score TYPE double precision",
+        "ALTER TABLE ai_suggestions ALTER COLUMN confidence TYPE double precision",
+    ]
+    with engine.begin() as conn:
+        for stmt in stmts:
+            try:
+                conn.execute(text(stmt))
+            except Exception:
+                pass  # already migrated (sqlite dev) or column already float
 
 
 # ---------------------------------------------------------------- health
@@ -425,6 +442,23 @@ def finalize_document(document_id: str, payload: FinalizeIn,
     pdf_pages = [p for p in ordered if p.content_type == "application/pdf"]
     if pdf_pages:
         _expand_pdf_pages(db, ordered, pdf_pages)
+        # billing + queue must cover every sibling row of each PDF
+        final: list[Page] = []
+        seen_keys: set[str] = set()
+        for p in ordered:
+            if p.content_type == "application/pdf":
+                if p.storage_key in seen_keys:
+                    continue
+                seen_keys.add(p.storage_key)
+                final.extend(
+                    db.query(Page)
+                    .filter_by(document_id=p.document_id, storage_key=p.storage_key)
+                    .order_by(Page.id)
+                    .all()
+                )
+            else:
+                final.append(p)
+        ordered = final
 
     total_pages = len(ordered)
     cost = total_pages * credits.page_cost()
