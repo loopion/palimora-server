@@ -9,6 +9,31 @@ from sqlalchemy.orm import Session
 
 from . import credits, kraken, storage
 from .config import settings
+
+
+def _page_file_bytes(page) -> bytes:
+    """Fetch the original file bytes: direct from S3 when configured, otherwise
+    from the API over an internal route (local backend has no shared volume)."""
+    import httpx as _httpx
+    if settings.storage_backend == "s3":
+        import tempfile, os
+        local = storage.download_to_temp(page.storage_key)
+        try:
+            with open(local, "rb") as f:
+                return f.read()
+        finally:
+            try:
+                os.remove(local)
+            except OSError:
+                pass
+    resp = _httpx.get(
+        f"{settings.internal_api_url}/api/internal/pages/{page.id}/file",
+        headers={"X-Internal-Key": settings.secret_key},
+        timeout=300,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"Fichier source inaccessible ({resp.status_code})")
+    return resp.content
 from .models import Document, Page, PageJob, Transcription, Segment
 
 
@@ -49,9 +74,18 @@ def run_ocr_job(payload: dict) -> dict:
             return {"ok": True, "page_id": page.id}
         except Exception as exc:  # noqa: BLE001 — refund + flag, never crash silently
             db.rollback()
-            _fail(db, page, str(exc))
+            message = str(exc)
+            targets = [page]
+            if page.content_type.startswith("application/pdf"):
+                targets = (
+                    db.query(Page)
+                    .filter_by(document_id=page.document_id, storage_key=page.storage_key)
+                    .all()
+                )
+            for p in targets:
+                _fail(db, p, message)
             db.commit()
-            return {"ok": False, "page_id": page.id, "error": str(exc)[:500]}
+            return {"ok": False, "page_id": page.id, "error": message[:500]}
     finally:
         db.close()
 
@@ -59,23 +93,14 @@ def run_ocr_job(payload: dict) -> dict:
 def _run_image(db: Session, page: Page) -> None:
     page.processing_status = "transcribing"
     db.commit()
-    local = storage.download_to_temp(page.storage_key)
-    try:
-        with open(local, "rb") as f:
-            file_bytes = f.read()
-        ext = "." + (page.storage_key.rsplit(".", 1)[-1] or "bin")
-        with httpx.Client() as http:
-            job_id = kraken.submit_ocr(http, file_bytes, ext)
-            page.kraken_job_id = job_id
-            db.commit()
-            result = kraken.wait_for_result(http, job_id)
-        _save_result(db, page, result.get("pages") or [])
-    finally:
-        import os
-        try:
-            os.remove(local)
-        except OSError:
-            pass
+    file_bytes = _page_file_bytes(page)
+    ext = "." + (page.storage_key.rsplit(".", 1)[-1] or "bin")
+    with httpx.Client() as http:
+        job_id = kraken.submit_ocr(http, file_bytes, ext)
+        page.kraken_job_id = job_id
+        db.commit()
+        result = kraken.wait_for_result(http, job_id)
+    _save_result(db, page, result.get("pages") or [])
 
 
 def _run_pdf(db: Session, page: Page, document: Document) -> None:
@@ -90,30 +115,18 @@ def _run_pdf(db: Session, page: Page, document: Document) -> None:
         p.processing_status = "transcribing"
     db.commit()
 
-    local = storage.download_to_temp(page.storage_key)
-    try:
-        with open(local, "rb") as f:
-            file_bytes = f.read()
-        with httpx.Client() as http:
-            job_id = kraken.submit_ocr(http, file_bytes, ".pdf")
-            for p in siblings:
-                p.kraken_job_id = job_id
-            db.commit()
-            result = kraken.wait_for_result(http, job_id)
-        pages_result = result.get("pages") or []
+    file_bytes = _page_file_bytes(page)
+    with httpx.Client() as http:
+        job_id = kraken.submit_ocr(http, file_bytes, ".pdf")
         for p in siblings:
-            kraken_page = next(
-                (pr for pr in pages_result if pr.get("page") == p.page_number), None
-            )
-            if kraken_page is None and p.page_number <= len(pages_result):
-                kraken_page = pages_result[p.page_number - 1]
-            _save_result(db, p, [kraken_page] if kraken_page else [])
-    finally:
-        import os
-        try:
-            os.remove(local)
-        except OSError:
-            pass
+            p.kraken_job_id = job_id
+        db.commit()
+        result = kraken.wait_for_result(http, job_id)
+    pages_result = result.get("pages") or []
+    ordered = sorted(siblings, key=lambda p: (p.page_number, p.id))
+    for idx, p in enumerate(ordered):
+        kraken_page = pages_result[idx] if idx < len(pages_result) else None
+        _save_result(db, p, [kraken_page] if kraken_page else [])
 
 
 def _save_result(db: Session, page: Page, kraken_pages: list[dict]) -> None:

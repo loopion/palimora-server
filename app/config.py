@@ -24,6 +24,9 @@ class Settings:
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     queue_name: str = os.getenv("PALIMORA_QUEUE", "palimora-ocr")
 
+    # Internal API (worker → API file access for the local storage backend)
+    internal_api_url: str = os.getenv("INTERNAL_API_URL", "http://localhost:8000")
+
     # Kraken OCR engine
     kraken_api_url: str = os.getenv("KRAKEN_API_URL", "http://localhost:8000")
     kraken_api_key: str = os.getenv("KRAKEN_API_KEY", "")

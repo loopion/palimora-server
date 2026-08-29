@@ -394,6 +394,20 @@ def get_page_image(page_id: str, db: Session = Depends(get_db),
                     media_type=page.content_type or "application/octet-stream")
 
 
+@app.get("/api/internal/pages/{page_id}/file")
+def internal_page_file(page_id: str, request: Request, db: Session = Depends(get_db)):
+    """Worker-only file access for the local storage backend (no shared volume)."""
+    from fastapi.responses import Response
+    from .config import settings as _s
+    if request.headers.get("X-Internal-Key") != _s.secret_key:
+        raise HTTPException(status_code=403, detail="Clé interne invalide")
+    page = db.query(Page).filter_by(id=page_id).one_or_none()
+    if not page or not page.storage_key:
+        raise HTTPException(status_code=404, detail="Page introuvable")
+    return Response(content=storage.read_bytes(page.storage_key),
+                    media_type=page.content_type or "application/octet-stream")
+
+
 @app.post("/api/documents/{document_id}/finalize")
 def finalize_document(document_id: str, payload: FinalizeIn,
                       db: Session = Depends(get_db), user: User = Depends(get_current_user)):
@@ -401,10 +415,13 @@ def finalize_document(document_id: str, payload: FinalizeIn,
     pages = db.query(Page).filter_by(document_id=doc.id).all()
     by_id = {p.id: p for p in pages}
     ordered = [by_id[pid] for pid in payload.page_ids if pid in by_id]
+    # finalize is not re-runnable: only idle/errored pages are processed (use /reocr)
+    ordered = [p for p in ordered if p.processing_status in ("idle", "error")]
     if not ordered:
-        raise HTTPException(status_code=400, detail="Aucune page valide")
+        raise HTTPException(status_code=400,
+                            detail="Aucune page à traiter (déjà en file ou traitée — utilisez ré-OCR)")
 
-    # PDF: expand to one page row per PDF page (same storage_key)
+    # PDF: expand to one page row per PDF page (same storage_key, once)
     pdf_pages = [p for p in ordered if p.content_type == "application/pdf"]
     if pdf_pages:
         _expand_pdf_pages(db, ordered, pdf_pages)
@@ -446,6 +463,10 @@ def finalize_document(document_id: str, payload: FinalizeIn,
 def _expand_pdf_pages(db: Session, ordered: list[Page], pdf_pages: list[Page]) -> None:
     """A PDF row becomes N page rows sharing the same storage_key."""
     for pdf in pdf_pages:
+        existing = db.query(Page).filter_by(
+            document_id=pdf.document_id, storage_key=pdf.storage_key).count()
+        if existing > 1:
+            continue  # already expanded by a previous finalize attempt
         if pdf.size_bytes <= 0:
             size = storage.object_size(pdf.storage_key)
             pdf.size_bytes = size or 0
@@ -453,19 +474,23 @@ def _expand_pdf_pages(db: Session, ordered: list[Page], pdf_pages: list[Page]) -
         try:
             reader = pypdf.PdfReader(io.BytesIO(open(local, "rb").read()))
             count = len(reader.pages)
-        except Exception:
-            count = 1
+        except Exception as exc:
+            raise HTTPException(status_code=422,
+                                detail=f"PDF illisible ({exc})") from exc
         finally:
             try:
                 os.remove(local)
             except OSError:
                 pass
+        if count < 1:
+            raise HTTPException(status_code=422, detail="PDF sans page")
         for extra in range(1, count):
             db.add(Page(
                 document_id=pdf.document_id, page_number=0,  # renumbered at finalize
                 storage_key=pdf.storage_key, content_type=pdf.content_type,
                 size_bytes=pdf.size_bytes,
             ))
+        db.flush()  # new rows must be visible to the sibling query (autoflush off)
         # reload the page list including the new rows
         siblings = db.query(Page).filter_by(
             document_id=pdf.document_id, storage_key=pdf.storage_key
