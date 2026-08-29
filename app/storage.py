@@ -35,6 +35,18 @@ def storage_configured() -> bool:
     return bool(settings.s3_access_key and settings.s3_bucket)
 
 
+def ensure_bucket() -> None:
+    """Create the bucket when missing (MinIO interim; B2 keys may be restricted)."""
+    if settings.storage_backend != "s3":
+        return
+    try:
+        buckets = {b["Name"] for b in client().list_buckets().get("Buckets", [])}
+        if settings.s3_bucket not in buckets:
+            client().create_bucket(Bucket=settings.s3_bucket)
+    except Exception:
+        pass  # restricted keys: assume the bucket exists
+
+
 def object_key(user_id: str, document_id: str, page_id: str, ext: str) -> str:
     ext = (ext or "bin").lstrip(".")
     return f"originals/{user_id}/{document_id}/{page_id}.{ext}"

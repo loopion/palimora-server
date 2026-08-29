@@ -41,6 +41,9 @@ class Settings:
     s3_access_key: str = os.getenv("S3_ACCESS_KEY", "")
     s3_secret_key: str = os.getenv("S3_SECRET_KEY", "")
     presign_ttl: int = _int("PRESIGN_TTL", 3600)
+    # true when the S3 endpoint is publicly reachable (B2) so presigned image
+    # URLs work in the browser; false (MinIO interim) routes images via the API.
+    s3_presign_public: bool = os.getenv("S3_PRESIGN_PUBLIC", "false").lower() == "true"
 
     # Upload limits (matches the OCR engine limit)
     max_upload_mb: int = _int("MAX_UPLOAD_MB", 50)

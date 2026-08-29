@@ -38,6 +38,7 @@ app.add_middleware(
 def on_startup():
     Base.metadata.create_all(engine)
     _migrate()
+    storage.ensure_bucket()
 
 
 def _migrate() -> None:
@@ -583,9 +584,11 @@ def get_page(page_id: str, db: Session = Depends(get_db),
         AISuggestion.created_at.desc()).all()
     return {
         **_page_out(db, page),
-        "image_url": (storage.presign_get(page.storage_key, ttl=3600)
-                      if (page.storage_key and settings.storage_backend == "s3")
-                      else f"/api/pages/{page.id}/image" if page.storage_key else ""),
+        "image_url": (
+            storage.presign_get(page.storage_key, ttl=3600)
+            if (page.storage_key and settings.storage_backend == "s3" and settings.s3_presign_public)
+            else f"/api/pages/{page.id}/image" if page.storage_key else ""
+        ),
         "transcription": {
             "id": transcription.id,
             "raw_htr_text": transcription.raw_htr_text,
@@ -608,6 +611,15 @@ def reocr_page(page_id: str, db: Session = Depends(get_db),
                user: User = Depends(get_current_user)):
     page = _own_page(db, user, page_id)
     doc = page.document
+    if page.content_type.startswith("application/pdf"):
+        busy = db.query(Page).filter(
+            Page.document_id == doc.id,
+            Page.storage_key == page.storage_key,
+            Page.processing_status.in_(("queued", "transcribing")),
+        ).count()
+        if busy:
+            raise HTTPException(status_code=409,
+                                detail="Ce PDF est déjà en cours de traitement")
     try:
         credits.charge(db, user, credits.page_cost(), "page_ocr",
                        ref_type="page", ref_id=page.id, note="Ré-OCR")
