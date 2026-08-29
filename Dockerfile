@@ -23,7 +23,7 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=10 --start-period=5s \
-  CMD curl -sf http://localhost:8000/api/health || exit 1
+  CMD sh -c 'if [ "$PALIMORA_ROLE" = "worker" ]; then exit 0; fi; curl -sf http://localhost:8000/api/health || exit 1'
 
 # PALIMORA_ROLE selects api (default) or worker — Coolify ignores per-app
 # Start Commands for Dockerfile builds, so the role is env-driven.
