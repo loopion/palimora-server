@@ -99,6 +99,7 @@ class Page(Base):
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
     page_number: Mapped[int] = mapped_column(Integer, default=1)
     storage_key: Mapped[str] = mapped_column(String(512), default="")
+    derivative_key: Mapped[str | None] = mapped_column(String(512), nullable=True)  # PNG render (PDF pages)
     content_type: Mapped[str] = mapped_column(String(60), default="")
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     # idle | queued | transcribing | done | error

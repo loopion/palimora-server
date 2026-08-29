@@ -5,6 +5,7 @@ Two job shapes:
 - PDF page:   1 Kraken job for the whole file, result split across the page rows
 """
 import httpx
+from pdf2image import convert_from_path
 from sqlalchemy.orm import Session
 
 from . import credits, kraken, storage
@@ -14,7 +15,6 @@ from .config import settings
 def _page_file_bytes(page) -> bytes:
     """Fetch the original file bytes: direct from S3 when configured, otherwise
     from the API over an internal route (local backend has no shared volume)."""
-    import httpx as _httpx
     if settings.storage_backend == "s3":
         import tempfile, os
         local = storage.download_to_temp(page.storage_key)
@@ -127,6 +127,37 @@ def _run_pdf(db: Session, page: Page, document: Document) -> None:
     for idx, p in enumerate(ordered):
         kraken_page = pages_result[idx] if idx < len(pages_result) else None
         _save_result(db, p, [kraken_page] if kraken_page else [])
+        _render_pdf_derivative(db, p, idx + 1, len(ordered))
+
+
+def _render_pdf_derivative(db: Session, page: Page, page_number: int, total: int) -> None:
+    """Store a PNG render of the PDF page so the web viewer can display it."""
+    import os as _os
+    import tempfile as _tempfile
+
+    try:
+        local = storage.download_to_temp(page.storage_key)
+    except Exception:
+        return
+    try:
+        images = convert_from_path(local, dpi=150, first_page=page_number, last_page=page_number)
+        if not images:
+            return
+        fd, png_path = _tempfile.mkstemp(suffix=".png")
+        _os.close(fd)
+        images[0].save(png_path, format="PNG")
+        derivative_key = page.storage_key.rsplit(".", 1)[0] + ".png"
+        storage.upload_file(png_path, derivative_key, "image/png")
+        page.derivative_key = derivative_key
+        db.commit()
+        _os.remove(png_path)
+    except Exception as exc:  # noqa: BLE001 — derivative is best-effort
+        print(f"derivative render failed for page {page.id}: {exc}")
+    finally:
+        try:
+            _os.remove(local)
+        except OSError:
+            pass
 
 
 def _save_result(db: Session, page: Page, kraken_pages: list[dict]) -> None:

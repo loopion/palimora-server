@@ -45,6 +45,7 @@ def _migrate() -> None:
     """Tiny in-place migrations for beta deployments (no Alembic yet)."""
     from sqlalchemy import text
     stmts = [
+        "ALTER TABLE pages ADD COLUMN IF NOT EXISTS derivative_key VARCHAR(512)",
         "ALTER TABLE transcriptions ALTER COLUMN confidence_score TYPE double precision",
         "ALTER TABLE segments ALTER COLUMN confidence_score TYPE double precision",
         "ALTER TABLE ai_suggestions ALTER COLUMN confidence TYPE double precision",
@@ -153,6 +154,18 @@ def _latest_transcription(db: Session, page_id: str) -> Transcription | None:
         .order_by(Transcription.version_number.desc())
         .first()
     )
+
+
+def _page_image_url(page: Page) -> str:
+    """Presigned URL for the best displayable render (PNG derivative > original)."""
+    if not page.storage_key:
+        return ""
+    if settings.storage_backend == "s3" and settings.s3_presign_public:
+        target = page.derivative_key or page.storage_key
+        if page.content_type.startswith("application/pdf") and not page.derivative_key:
+            return ""  # PDF without derivative: not displayable in an <img>
+        return storage.presign_get(target, ttl=3600) or ""
+    return f"/api/pages/{page.id}/image"
 
 
 def _page_out(db: Session, page: Page) -> dict:
@@ -405,11 +418,12 @@ async def upload_page_bytes(page_id: str, file: UploadFile,
 def get_page_image(page_id: str, db: Session = Depends(get_db),
                    user: User = Depends(get_current_user)):
     page = _own_page(db, user, page_id)
-    if not page.storage_key or not storage.object_exists(page.storage_key):
+    key = page.derivative_key or page.storage_key
+    if not key or not storage.object_exists(key):
         raise HTTPException(status_code=404, detail="Image non trouvée")
     from fastapi.responses import Response
-    return Response(content=storage.read_bytes(page.storage_key),
-                    media_type=page.content_type or "application/octet-stream")
+    media = "image/png" if page.derivative_key else (page.content_type or "application/octet-stream")
+    return Response(content=storage.read_bytes(key), media_type=media)
 
 
 @app.get("/api/internal/pages/{page_id}/file")
@@ -584,11 +598,7 @@ def get_page(page_id: str, db: Session = Depends(get_db),
         AISuggestion.created_at.desc()).all()
     return {
         **_page_out(db, page),
-        "image_url": (
-            storage.presign_get(page.storage_key, ttl=3600)
-            if (page.storage_key and settings.storage_backend == "s3" and settings.s3_presign_public)
-            else f"/api/pages/{page.id}/image" if page.storage_key else ""
-        ),
+        "image_url": _page_image_url(page),
         "transcription": {
             "id": transcription.id,
             "raw_htr_text": transcription.raw_htr_text,
@@ -880,6 +890,41 @@ def admin_stats(db: Session = Depends(get_db), admin: User = Depends(get_admin_u
         "pages_total": db.query(Page).count(),
         "credits_in_circulation": db.query(func.sum(User.credit_balance)).scalar() or 0,
     }
+
+
+# ---------------------------------------------------------------- search
+@app.get("/api/search")
+def search(q: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    needle = f"%{q.strip()}%"
+    if len(q.strip()) < 2:
+        return {"results": []}
+    rows = (
+        db.query(Segment, Transcription, Page, Document)
+        .join(Transcription, Segment.transcription_id == Transcription.id)
+        .join(Page, Transcription.page_id == Page.id)
+        .join(Document, Page.document_id == Document.id)
+        .filter(Document.user_id == user.id)
+        .filter(
+            (Segment.source_text.ilike(needle))
+            | (Segment.edited_text.ilike(needle))
+        )
+        .order_by(Document.title, Page.page_number, Segment.reading_order)
+        .limit(60)
+        .all()
+    )
+    results = []
+    for segment, transcription, page, document in rows:
+        text = (segment.edited_text or segment.source_text or "").strip()
+        low = text.lower()
+        pos = low.find(q.strip().lower())
+        start = max(0, pos - 40)
+        snippet = ("…" if start > 0 else "") + text[start:start + 120] + ("…" if start + 120 < len(text) else "")
+        results.append({
+            "document_id": document.id, "document_title": document.title,
+            "page_id": page.id, "page_number": page.page_number,
+            "segment_id": segment.id, "snippet": snippet,
+        })
+    return {"results": results}
 
 
 # ---------------------------------------------------------------- static SPA
