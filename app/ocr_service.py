@@ -170,7 +170,10 @@ def _save_result(db: Session, page: Page, kraken_pages: list[dict]) -> None:
     avg_conf = (sum(confidences) / len(confidences)) if confidences else 0.0
 
     # keep only the latest transcription: replace previous rows
-    db.query(Transcription).filter_by(page_id=page.id).delete()
+    # (bulk query.delete() bypasses ORM cascades — delete segments explicitly)
+    for old_t in db.query(Transcription).filter_by(page_id=page.id).all():
+        db.query(Segment).filter_by(transcription_id=old_t.id).delete()
+        db.delete(old_t)
 
     transcription = Transcription(
         page_id=page.id,
