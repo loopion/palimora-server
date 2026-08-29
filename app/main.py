@@ -21,7 +21,8 @@ from .config import settings
 from .credits import InsufficientCredits
 from .db import Base, SessionLocal, engine, get_db
 from .models import (
-    AISuggestion, Device, Document, GlossaryEntry, Page, PageJob, Transcription, User,
+    AISuggestion, Device, Document, GlossaryEntry, Page, PageJob, Segment,
+    Transcription, User,
 )
 from .ocr_service import enqueue_page_ocr
 
