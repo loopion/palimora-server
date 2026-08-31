@@ -731,6 +731,7 @@ def ai_suggest(page_id: str, payload: SuggestIn,
     if not text:
         raise HTTPException(status_code=400, detail="Page vide")
     try:
+        # ai_cost() is 0 in the current pricing (AI correction free) -> no-op.
         credits.charge(db, user, credits.ai_cost(), "ai_correction",
                        ref_type="page", ref_id=page.id, note="Correction IA")
     except InsufficientCredits as exc:
