@@ -938,6 +938,60 @@ def admin_stats(db: Session = Depends(get_db), admin: User = Depends(get_admin_u
     }
 
 
+@app.get("/api/admin/billing/events")
+def admin_billing_events(failed: int = 0, db: Session = Depends(get_db),
+                         admin: User = Depends(get_admin_user)):
+    q = db.query(StripeEvent)
+    if failed:
+        q = q.filter(StripeEvent.processed_at.is_(None), StripeEvent.error != "")
+    rows = q.order_by(StripeEvent.received_at.desc()).limit(100).all()
+    return {"events": [
+        {"id": e.id, "type": e.type, "error": e.error,
+         "received_at": e.received_at.isoformat() if e.received_at else None,
+         "processed": e.processed_at is not None}
+        for e in rows
+    ]}
+
+
+@app.post("/api/admin/billing/events/{event_id}/replay")
+def admin_billing_replay(event_id: str, db: Session = Depends(get_db),
+                         admin: User = Depends(get_admin_user)):
+    row = db.get(StripeEvent, event_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Événement inconnu")
+    try:
+        billing._handle_event(db, row.payload_json)
+        row.processed_at = datetime.now(timezone.utc)
+        row.error = ""
+        db.commit()
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        row = db.get(StripeEvent, event_id)
+        row.error = str(e)[:500]
+        db.commit()
+        raise HTTPException(status_code=500, detail=str(e)[:200]) from e
+    return {"status": "processed"}
+
+
+@app.get("/api/admin/users/{user_id}/billing")
+def admin_user_billing(user_id: str, db: Session = Depends(get_db),
+                       admin: User = Depends(get_admin_user)):
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Utilisateur inconnu")
+    sub = (db.query(Subscription).filter_by(user_id=user_id)
+           .order_by(Subscription.created_at.desc()).first())
+    purchases = (db.query(CreditTransaction).filter_by(user_id=user_id)
+                 .order_by(CreditTransaction.created_at.desc()).limit(20).all())
+    return {
+        "credit_balance": target.credit_balance,
+        "subscription": billing._sub_dict(sub),
+        "purchases": [{"reason": p.reason, "delta": p.delta, "note": p.note,
+                       "created_at": p.created_at.isoformat() if p.created_at else None}
+                      for p in purchases],
+    }
+
+
 # ---------------------------------------------------------------- search
 @app.get("/api/search")
 def search(q: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
