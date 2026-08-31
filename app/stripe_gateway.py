@@ -5,6 +5,7 @@ import stripe
 from .config import settings
 
 stripe.api_key = settings.stripe_secret_key
+stripe.api_version = "2024-12-18.acacia"
 
 
 class GatewayError(Exception):

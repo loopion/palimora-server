@@ -79,7 +79,7 @@ class Settings:
     stripe_secret_key: str = os.getenv("STRIPE_SECRET_KEY", "")
     stripe_publishable_key: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
     stripe_webhook_secret: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-    stripe_tax_enabled: bool = os.getenv("STRIPE_TAX_ENABLED", "true").lower() == "true"
+    stripe_tax_enabled: bool = os.getenv("STRIPE_TAX_ENABLED", "false").lower() == "true"
     stripe_price_ids: dict = {
         "starter": os.getenv("STRIPE_PRICE_STARTER", ""),
         "chercheur": os.getenv("STRIPE_PRICE_CHERCHEUR", ""),
