@@ -300,6 +300,7 @@ def _me_out(user: User) -> MeOut:
 
 
 app.include_router(billing.router)
+app.include_router(billing.webhook_router)
 
 
 # ---------------------------------------------------------------- usage

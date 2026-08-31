@@ -1,4 +1,6 @@
 """Customer-facing billing: catalogue, purchase intents, subscription, webhook."""
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -141,3 +143,144 @@ def cancel(user: User = Depends(get_current_user), db: Session = Depends(get_db)
     row.cancel_at_period_end = True
     db.commit()
     return {"status": "canceling"}
+
+
+webhook_router = APIRouter()
+
+
+def _grant_once(db: Session, user: User, amount: int, reason: str,
+                ref_type: str, ref_id: str) -> None:
+    if amount == 0:
+        return
+    exists = (db.query(CreditTransaction)
+              .filter(CreditTransaction.ref_id == ref_id,
+                      CreditTransaction.reason == reason).first())
+    if exists:
+        return
+    credits.grant(db, user, amount, reason, ref_type=ref_type, ref_id=ref_id)
+
+
+def _user_or_raise(db: Session, user_id: str) -> User:
+    user = db.get(User, user_id)
+    if not user:
+        raise ValueError(f"unknown user {user_id}")
+    return user
+
+
+def _on_payment_intent_succeeded(db: Session, obj: dict) -> None:
+    meta = obj.get("metadata") or {}
+    if meta.get("kind") != "credit_pack":
+        return
+    user = _user_or_raise(db, meta.get("user_id", ""))
+    pack = pricing.get(meta.get("pack_id", ""))
+    if not pack:
+        raise ValueError(f"unknown pack {meta.get('pack_id')}")
+    _grant_once(db, user, pack.credits, "purchase",
+                ref_type="stripe_pi", ref_id=obj["id"])
+
+
+def _on_invoice_paid(db: Session, obj: dict) -> None:
+    sub_id = obj.get("subscription")
+    if not sub_id:
+        return
+    price_id = obj["lines"]["data"][0]["price"]["id"]
+    pack = pricing.pack_by_price_id(price_id)
+    if not pack:
+        raise ValueError(f"unknown price {price_id}")
+    row = (db.query(Subscription)
+           .filter_by(stripe_subscription_id=sub_id).first())
+    if row:
+        user = _user_or_raise(db, row.user_id)
+        row.status = "active"
+        period_end = obj.get("period_end")
+        if period_end:
+            row.current_period_end = datetime.fromtimestamp(period_end, tz=timezone.utc)
+    else:
+        raise ValueError(f"no local subscription {sub_id}")
+    _grant_once(db, user, pack.credits, "subscription_grant",
+                ref_type="stripe_inv", ref_id=obj["id"])
+
+
+def _on_subscription_updated(db: Session, obj: dict) -> None:
+    row = db.query(Subscription).filter_by(stripe_subscription_id=obj["id"]).first()
+    if not row:
+        return
+    row.status = obj.get("status", row.status)
+    row.cancel_at_period_end = bool(obj.get("cancel_at_period_end"))
+    period_end = obj.get("current_period_end")
+    if period_end:
+        row.current_period_end = datetime.fromtimestamp(period_end, tz=timezone.utc)
+
+
+def _on_subscription_deleted(db: Session, obj: dict) -> None:
+    row = db.query(Subscription).filter_by(stripe_subscription_id=obj["id"]).first()
+    if row:
+        row.status = "canceled"
+
+
+def _on_charge_refunded(db: Session, obj: dict) -> None:
+    pi = obj.get("payment_intent")
+    if not pi:
+        return
+    grant = (db.query(CreditTransaction)
+             .filter_by(ref_id=pi, reason="purchase").first())
+    if not grant:
+        return
+    user = _user_or_raise(db, grant.user_id)
+    take = min(grant.delta, user.credit_balance)
+    if take <= 0:
+        return
+    _grant_once(db, user, -take, "refund", ref_type="stripe_refund", ref_id=obj["id"])
+    if take < grant.delta:
+        # record the clamp for audit
+        last = (db.query(CreditTransaction)
+                .filter_by(ref_id=obj["id"], reason="refund").first())
+        if last:
+            last.note = f"clamped: owed {grant.delta}, took {take}"
+
+
+_HANDLERS = {
+    "payment_intent.succeeded": _on_payment_intent_succeeded,
+    "invoice.paid": _on_invoice_paid,
+    "customer.subscription.updated": _on_subscription_updated,
+    "customer.subscription.deleted": _on_subscription_deleted,
+    "charge.refunded": _on_charge_refunded,
+}
+
+
+def _handle_event(db: Session, event: dict) -> None:
+    handler = _HANDLERS.get(event["type"])
+    if handler:
+        handler(db, event["data"]["object"])
+
+
+@webhook_router.post("/api/stripe/webhook")
+async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+    payload = await request.body()
+    sig = request.headers.get("Stripe-Signature", "")
+    try:
+        event = stripe_gateway.construct_event(payload, sig)
+    except stripe_gateway.GatewayError:
+        raise HTTPException(status_code=400, detail="Signature invalide")
+
+    row = db.get(StripeEvent, event["id"])
+    if row and row.processed_at is not None:
+        return {"received": True, "duplicate": True}
+    if row is None:
+        row = StripeEvent(id=event["id"], type=event["type"], payload_json=event)
+        db.add(row)
+        db.commit()
+
+    try:
+        _handle_event(db, event)
+        row.processed_at = datetime.now(timezone.utc)
+        row.error = ""
+        db.commit()
+    except Exception as e:  # noqa: BLE001 - store + surface for Stripe retry
+        db.rollback()
+        row = db.get(StripeEvent, event["id"])
+        row.error = str(e)[:500]
+        row.processed_at = None
+        db.commit()
+        raise HTTPException(status_code=500, detail="Traitement échoué") from e
+    return {"received": True}
