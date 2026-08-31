@@ -968,6 +968,7 @@ def admin_billing_replay(event_id: str, db: Session = Depends(get_db),
         db.rollback()
         row = db.get(StripeEvent, event_id)
         row.error = str(e)[:500]
+        row.processed_at = None
         db.commit()
         raise HTTPException(status_code=500, detail=str(e)[:200]) from e
     return {"status": "processed"}

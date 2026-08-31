@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import credits, pricing, stripe_gateway
@@ -187,16 +188,26 @@ def _on_invoice_paid(db: Session, obj: dict) -> None:
     pack = pricing.pack_by_price_id(price_id)
     if not pack:
         raise ValueError(f"unknown price {price_id}")
+    period_end = obj.get("period_end")
+    period_end_dt = (datetime.fromtimestamp(period_end, tz=timezone.utc)
+                     if period_end else None)
     row = (db.query(Subscription)
            .filter_by(stripe_subscription_id=sub_id).first())
     if row:
         user = _user_or_raise(db, row.user_id)
         row.status = "active"
-        period_end = obj.get("period_end")
-        if period_end:
-            row.current_period_end = datetime.fromtimestamp(period_end, tz=timezone.utc)
+        if period_end_dt:
+            row.current_period_end = period_end_dt
     else:
-        raise ValueError(f"no local subscription {sub_id}")
+        # No local row (dashboard-created, lost insert, DB restore) — upsert it.
+        customer_id = obj.get("customer")
+        user = (db.query(User).filter_by(stripe_customer_id=customer_id).first()
+                if customer_id else None)
+        if not user:
+            raise ValueError(f"no local subscription {sub_id} and no user for customer {customer_id}")
+        db.add(Subscription(user_id=user.id, stripe_subscription_id=sub_id,
+                            plan_id=pack.id, status="active",
+                            current_period_end=period_end_dt))
     _grant_once(db, user, pack.credits, "subscription_grant",
                 ref_type="stripe_inv", ref_id=obj["id"])
 
@@ -269,7 +280,14 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     if row is None:
         row = StripeEvent(id=event["id"], type=event["type"], payload_json=event)
         db.add(row)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # Concurrent first delivery raced us to the insert.
+            db.rollback()
+            row = db.get(StripeEvent, event["id"])
+            if row is not None and row.processed_at is not None:
+                return {"received": True, "duplicate": True}
 
     try:
         _handle_event(db, event)
