@@ -59,6 +59,10 @@ def _migrate() -> None:
             except Exception:
                 pass  # already migrated (sqlite dev) or column already float
 
+    from . import migrations as _mig
+    with engine.begin() as conn:
+        _mig.run_once(conn, "rebase_credits_v2", _mig.rebase_credits_v2)
+
 
 # ---------------------------------------------------------------- health
 @app.get("/health")
