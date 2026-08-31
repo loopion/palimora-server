@@ -50,6 +50,7 @@ def _migrate() -> None:
         "ALTER TABLE transcriptions ALTER COLUMN confidence_score TYPE double precision",
         "ALTER TABLE segments ALTER COLUMN confidence_score TYPE double precision",
         "ALTER TABLE ai_suggestions ALTER COLUMN confidence TYPE double precision",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS tags JSON DEFAULT '[]'",
     ]
     with engine.begin() as conn:
         for stmt in stmts:
@@ -95,6 +96,15 @@ class DocumentIn(BaseModel):
     language_code: str = "fra"
     notes: str = ""
     tags: list[str] = []
+
+
+class DocumentPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    subtitle: str | None = Field(default=None, max_length=255)
+    document_date: str | None = Field(default=None, max_length=32)
+    language_code: str | None = Field(default=None, max_length=10)
+    notes: str | None = Field(default=None, max_length=10000)
+    tags: list[str] | None = None
 
 
 class UploadUrlIn(BaseModel):
@@ -315,6 +325,29 @@ def create_document(payload: DocumentIn, db: Session = Depends(get_db),
     db.add(doc)
     db.commit()
     return {"id": doc.id, "status": doc.status}
+
+
+@app.patch("/api/documents/{document_id}")
+def update_document(document_id: str, payload: DocumentPatch, db: Session = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    doc = _own_document(db, user, document_id)
+    fields = payload.model_dump(exclude_unset=True)
+    if "tags" in fields:
+        seen: set[str] = set()
+        cleaned: list[str] = []
+        for t in fields["tags"] or []:
+            t = t.strip()
+            if t and t not in seen:
+                seen.add(t)
+                cleaned.append(t)
+        fields["tags"] = cleaned
+    for key, value in fields.items():
+        # Ne pas écraser une colonne NOT NULL avec un null explicite.
+        if value is None and key in ("title",):
+            continue
+        setattr(doc, key, value)
+    db.commit()
+    return {"id": doc.id, "title": doc.title, "tags": doc.tags or []}
 
 
 @app.get("/api/documents")
@@ -839,6 +872,7 @@ def queue_view(db: Session = Depends(get_db), user: User = Depends(get_current_u
                 counts["validated"] += 1
         items.append({
             "id": doc.id, "title": doc.title, "status": doc.status,
+            "tags": doc.tags or [],
             "pages": len(pages), **counts,
             "updated_at": doc.updated_at.isoformat(),
         })

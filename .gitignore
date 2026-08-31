@@ -6,3 +6,6 @@ web/dist/
 *.tsbuildinfo
 app/static/
 smoke.db
+
+.omc/
+web/.omc/

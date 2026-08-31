@@ -63,6 +63,7 @@ export interface QueueItem {
   id: string
   title: string
   status: string
+  tags: string[]
   pages: number
   done: number
   error: number
