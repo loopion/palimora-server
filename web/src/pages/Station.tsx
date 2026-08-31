@@ -323,6 +323,7 @@ export default function Station() {
         <span className="text-sm bg-indigo-50 text-indigo-700 rounded-full px-3 py-1">
           {me ? `${me.credit_balance} crédits` : '…'}
         </span>
+        <Link to="/billing" className="text-sm text-indigo-600 hover:underline">Acheter des crédits</Link>
         <div className="flex-1 max-w-md relative">
           <input ref={searchInputRef}
                  className="w-full border rounded-lg px-3 py-1.5 text-sm"
