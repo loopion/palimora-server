@@ -48,6 +48,55 @@ export const api = {
     request<T>(path, { method: 'POST', body: body !== undefined ? body : {} }),
   patch: <T>(path: string, body: unknown) => request<T>(path, { method: 'PATCH', body }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  billing: undefined as unknown as {
+    catalogue: () => Promise<BillingCatalogue>
+    status: () => Promise<BillingStatus>
+    intent: (packId: string) => Promise<{ client_secret: string; amount: number; currency: string }>
+    subscribe: (planId: string) => Promise<{ client_secret: string; subscription_id: string }>
+    cancel: () => Promise<{ status: string }>
+  },
+}
+
+export interface BillingPack {
+  id: string
+  kind: 'one_shot' | 'subscription'
+  credits: number
+  amount_eur: number
+  price_per_page: number
+  label: string
+  stripe_price_id: string
+  interval?: 'month'
+}
+
+export interface BillingCatalogue {
+  packs: BillingPack[]
+  publishable_key: string
+  enabled: boolean
+}
+
+export interface BillingSubscription {
+  plan_id: string
+  status: string
+  current_period_end: string | null
+  cancel_at_period_end: boolean
+}
+
+export interface BillingStatus {
+  credit_balance: number
+  subscription: BillingSubscription | null
+  purchases: { reason: string; delta: number; created_at: string | null; note: string }[]
+}
+
+api.billing = {
+  catalogue: () => api.get<BillingCatalogue>('/api/billing/catalogue'),
+  status: () => api.get<BillingStatus>('/api/billing/status'),
+  intent: (packId: string) =>
+    api.post<{ client_secret: string; amount: number; currency: string }>(
+      '/api/billing/intent', { pack_id: packId }),
+  subscribe: (planId: string) =>
+    api.post<{ client_secret: string; subscription_id: string }>(
+      '/api/billing/subscribe', { plan_id: planId }),
+  cancel: () => api.post<{ status: string }>('/api/billing/cancel'),
 }
 
 export interface Me {
