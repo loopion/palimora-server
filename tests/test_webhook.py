@@ -87,6 +87,75 @@ def test_charge_refunded_clamps_at_zero(client, db, _accept_sig, monkeypatch):
     assert db.get(type(u), u.id).credit_balance == 0  # clamped, not -250
 
 
+def test_invoice_paid_upserts_missing_local_subscription(client, db, _accept_sig, monkeypatch):
+    from tests.conftest import make_user
+    u = make_user(db, credits=0)
+    u.stripe_customer_id = "cus_upsert"
+    db.commit()
+    monkeypatch.setitem(billing.settings.stripe_price_ids, "atelier", "price_a")
+    _accept_sig["event"] = _event("evt_inv_up", "invoice.paid", {
+        "id": "in_up", "subscription": "sub_new", "customer": "cus_upsert",
+        "billing_reason": "subscription_create",
+        "lines": {"data": [{"price": {"id": "price_a"}}]},
+        "period_end": 1893456000,
+    })
+    r = client.post("/api/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "x"})
+    assert r.status_code == 200
+    db.expire_all()
+    row = db.query(Subscription).filter_by(stripe_subscription_id="sub_new").one()
+    assert row.status == "active"
+    assert row.user_id == u.id
+    assert db.get(type(u), u.id).credit_balance == 500
+
+
+def test_secondary_dedupe_by_payment_intent(client, db, _accept_sig, monkeypatch):
+    from tests.conftest import make_user
+    u = make_user(db, credits=0)
+    monkeypatch.setitem(billing.settings.stripe_price_ids, "starter", "price_s")
+    meta = {"user_id": u.id, "pack_id": "starter", "kind": "credit_pack"}
+    for evt_id in ("evt_a", "evt_b"):  # distinct events, same payment_intent
+        _accept_sig["event"] = _event(evt_id, "payment_intent.succeeded",
+                                      {"id": "pi_shared", "metadata": meta})
+        assert client.post("/api/stripe/webhook", content=b"{}",
+                           headers={"Stripe-Signature": "x"}).status_code == 200
+    db.expire_all()
+    assert db.get(type(u), u.id).credit_balance == 300
+    assert db.query(CreditTransaction).filter_by(ref_id="pi_shared", reason="purchase").count() == 1
+
+
+def test_subscription_updated_syncs_local_row(client, db, _accept_sig):
+    from tests.conftest import make_user
+    u = make_user(db)
+    db.add(Subscription(user_id=u.id, stripe_subscription_id="sub_up",
+                        plan_id="atelier", status="active"))
+    db.commit()
+    _accept_sig["event"] = _event("evt_su", "customer.subscription.updated", {
+        "id": "sub_up", "status": "past_due", "cancel_at_period_end": True,
+        "current_period_end": 1893456000,
+    })
+    r = client.post("/api/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "x"})
+    assert r.status_code == 200
+    db.expire_all()
+    row = db.query(Subscription).filter_by(stripe_subscription_id="sub_up").one()
+    assert row.status == "past_due"
+    assert row.cancel_at_period_end is True
+    assert row.current_period_end is not None
+
+
+def test_subscription_deleted_marks_canceled(client, db, _accept_sig):
+    from tests.conftest import make_user
+    u = make_user(db)
+    db.add(Subscription(user_id=u.id, stripe_subscription_id="sub_del",
+                        plan_id="atelier", status="active"))
+    db.commit()
+    _accept_sig["event"] = _event("evt_sd", "customer.subscription.deleted",
+                                  {"id": "sub_del", "status": "canceled"})
+    r = client.post("/api/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "x"})
+    assert r.status_code == 200
+    db.expire_all()
+    assert db.query(Subscription).filter_by(stripe_subscription_id="sub_del").one().status == "canceled"
+
+
 def test_unknown_event_ok(client, db, _accept_sig):
     _accept_sig["event"] = _event("evt_u", "customer.created", {"id": "cus_1"})
     r = client.post("/api/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "x"})
