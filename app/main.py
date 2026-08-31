@@ -12,7 +12,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import ai, credits, kraken, storage
+from . import ai, billing, credits, kraken, storage
 from .auth import (
     create_auth_token, get_admin_user, get_current_user, hash_password,
     issue_device_token, new_id, send_email, verify_password, consume_auth_token,
@@ -21,8 +21,8 @@ from .config import settings
 from .credits import InsufficientCredits
 from .db import Base, SessionLocal, engine, get_db
 from .models import (
-    AISuggestion, Device, Document, GlossaryEntry, Page, PageJob, Segment,
-    Transcription, User,
+    AISuggestion, CreditTransaction, Device, Document, GlossaryEntry, Page,
+    PageJob, Segment, StripeEvent, Subscription, Transcription, User,
 )
 from .ocr_service import enqueue_page_ocr
 
@@ -299,10 +299,12 @@ def _me_out(user: User) -> MeOut:
     )
 
 
+app.include_router(billing.router)
+
+
 # ---------------------------------------------------------------- usage
 @app.get("/api/usage")
 def usage(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    from .models import CreditTransaction
     txs = (
         db.query(CreditTransaction)
         .filter_by(user_id=user.id)
@@ -314,6 +316,8 @@ def usage(db: Session = Depends(get_db), user: User = Depends(get_current_user))
         "balance": user.credit_balance,
         "page_cost": credits.page_cost(),
         "ai_correction_cost": credits.ai_cost(),
+        "stripe_publishable_key": settings.stripe_publishable_key,
+        "credits_per_page": credits.page_cost(),
         "transactions": [
             {"delta": t.delta, "balance_after": t.balance_after, "reason": t.reason,
              "note": t.note, "created_at": t.created_at.isoformat()}
