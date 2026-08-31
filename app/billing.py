@@ -59,3 +59,30 @@ def status(user: User = Depends(get_current_user), db: Session = Depends(get_db)
             for p in purchases
         ],
     }
+
+
+class IntentIn(BaseModel):
+    pack_id: str
+
+
+@router.post("/intent")
+def create_intent(payload: IntentIn, user: User = Depends(get_current_user),
+                  db: Session = Depends(get_db)):
+    require_stripe()
+    pack = pricing.get(payload.pack_id)
+    if not pack or pack.kind != "one_shot":
+        raise HTTPException(status_code=400, detail="Pack inconnu")
+    price_id = settings.stripe_price_ids.get(pack.id)
+    if not price_id:
+        raise HTTPException(status_code=503, detail="Pack non configuré")
+    try:
+        customer_id = stripe_gateway.ensure_customer(user)
+        db.commit()
+        secret, amount, currency = stripe_gateway.create_payment_intent(
+            customer_id=customer_id,
+            price_id=price_id,
+            metadata={"user_id": user.id, "pack_id": pack.id, "kind": "credit_pack"},
+        )
+    except stripe_gateway.GatewayError as e:
+        raise HTTPException(status_code=502, detail="Paiement indisponible") from e
+    return {"client_secret": secret, "amount": amount, "currency": currency}
