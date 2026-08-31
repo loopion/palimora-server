@@ -86,3 +86,58 @@ def create_intent(payload: IntentIn, user: User = Depends(get_current_user),
     except stripe_gateway.GatewayError as e:
         raise HTTPException(status_code=502, detail="Paiement indisponible") from e
     return {"client_secret": secret, "amount": amount, "currency": currency}
+
+
+_ACTIVE_SUB = ("active", "past_due", "incomplete")
+
+
+class SubscribeIn(BaseModel):
+    plan_id: str
+
+
+@router.post("/subscribe")
+def subscribe(payload: SubscribeIn, user: User = Depends(get_current_user),
+              db: Session = Depends(get_db)):
+    require_stripe()
+    pack = pricing.get(payload.plan_id)
+    if not pack or pack.kind != "subscription":
+        raise HTTPException(status_code=400, detail="Plan inconnu")
+    price_id = settings.stripe_price_ids.get(pack.id)
+    if not price_id:
+        raise HTTPException(status_code=503, detail="Plan non configuré")
+    existing = (db.query(Subscription)
+                .filter(Subscription.user_id == user.id,
+                        Subscription.status.in_(_ACTIVE_SUB)).first())
+    if existing:
+        raise HTTPException(status_code=409, detail="Abonnement déjà actif")
+    try:
+        customer_id = stripe_gateway.ensure_customer(user)
+        db.commit()
+        secret, sub_id = stripe_gateway.create_subscription(
+            customer_id=customer_id, price_id=price_id,
+            metadata={"user_id": user.id, "plan_id": pack.id},
+        )
+    except stripe_gateway.GatewayError as e:
+        raise HTTPException(status_code=502, detail="Paiement indisponible") from e
+    db.add(Subscription(user_id=user.id, stripe_subscription_id=sub_id,
+                        plan_id=pack.id, status="incomplete"))
+    db.commit()
+    return {"client_secret": secret, "subscription_id": sub_id}
+
+
+@router.post("/cancel")
+def cancel(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    require_stripe()
+    row = (db.query(Subscription)
+           .filter(Subscription.user_id == user.id,
+                   Subscription.status.in_(_ACTIVE_SUB))
+           .order_by(Subscription.created_at.desc()).first())
+    if not row:
+        raise HTTPException(status_code=404, detail="Aucun abonnement")
+    try:
+        stripe_gateway.cancel_subscription(row.stripe_subscription_id)
+    except stripe_gateway.GatewayError as e:
+        raise HTTPException(status_code=502, detail="Paiement indisponible") from e
+    row.cancel_at_period_end = True
+    db.commit()
+    return {"status": "canceling"}
