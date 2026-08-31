@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import OpenSeadragon from 'openseadragon'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, getToken, Me, PageDetail, PageSummary, QueueItem, Segment, setToken } from '../api'
+import { usePrompt } from '../components/PromptModal'
 
 const statusBadge: Record<string, string> = {
   draft: 'bg-slate-200 text-slate-700',
@@ -36,6 +37,7 @@ export default function Station() {
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null)
   const [busy, setBusy] = useState('')
   const [toast, setToast] = useState('')
+  const { prompt: showPrompt, node: promptNode } = usePrompt()
   const [searchQuery, setSearchQuery] = useState('')
   const [searchHits, setSearchHits] = useState<SearchHit[] | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -213,7 +215,7 @@ export default function Station() {
   }
 
   async function newDocument() {
-    const title = prompt('Titre du document :')
+    const title = await showPrompt({ title: 'Nouveau document', label: 'Titre', placeholder: 'Liste Augustin…' })
     if (!title) return
     const data = await api.post<{ id: string }>('/api/documents', { title })
     await refreshQueue()
@@ -280,7 +282,10 @@ export default function Station() {
 
   async function editTags(doc: QueueItem, e: React.MouseEvent) {
     e.stopPropagation()
-    const next = prompt('Dossier / tags (séparés par des virgules) :', doc.tags.join(', '))
+    const next = await showPrompt({
+      title: 'Dossier / tags', label: 'Séparés par des virgules',
+      initial: doc.tags.join(', '),
+    })
     if (next === null) return
     const tags = [...new Set(next.split(',').map((t) => t.trim()).filter(Boolean))]
     try {
@@ -522,6 +527,7 @@ export default function Station() {
           {toast}
         </div>
       )}
+      {promptNode}
     </div>
   )
 }
