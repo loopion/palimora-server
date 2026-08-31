@@ -183,6 +183,9 @@ def _on_payment_intent_succeeded(db: Session, obj: dict) -> None:
 def _on_invoice_paid(db: Session, obj: dict) -> None:
     sub_id = obj.get("subscription")
     if not sub_id:
+        if obj.get("billing_reason", "").startswith("subscription"):
+            raise ValueError(
+                "invoice.paid for a subscription but no subscription id in payload")
         return
     price_id = obj["lines"]["data"][0]["price"]["id"]
     pack = pricing.pack_by_price_id(price_id)
@@ -238,16 +241,23 @@ def _on_charge_refunded(db: Session, obj: dict) -> None:
     if not grant:
         return
     user = _user_or_raise(db, grant.user_id)
-    take = min(grant.delta, user.credit_balance)
+    refunded = obj.get("amount_refunded") or 0
+    total = obj.get("amount") or 0
+    credits_to_revoke = round(grant.delta * refunded / total) if total else grant.delta
+    take = min(credits_to_revoke, user.credit_balance)
     if take <= 0:
         return
-    _grant_once(db, user, -take, "refund", ref_type="stripe_refund", ref_id=obj["id"])
-    if take < grant.delta:
+    try:
+        refund_id = obj["refunds"]["data"][-1]["id"]
+    except (KeyError, IndexError, TypeError):
+        refund_id = obj["id"]
+    _grant_once(db, user, -take, "refund", ref_type="stripe_refund", ref_id=refund_id)
+    if take < credits_to_revoke:
         # record the clamp for audit
         last = (db.query(CreditTransaction)
-                .filter_by(ref_id=obj["id"], reason="refund").first())
+                .filter_by(ref_id=refund_id, reason="refund").first())
         if last:
-            last.note = f"clamped: owed {grant.delta}, took {take}"
+            last.note = f"clamped: owed {credits_to_revoke}, took {take}"
 
 
 _HANDLERS = {

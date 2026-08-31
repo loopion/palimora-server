@@ -79,12 +79,57 @@ def test_charge_refunded_clamps_at_zero(client, db, _accept_sig, monkeypatch):
     credits.charge(db, u, 250, "page_ocr")
     db.commit()
     _accept_sig["event"] = _event("evt_ref", "charge.refunded", {
-        "id": "ch_1", "payment_intent": "pi_r", "amount_refunded": 2900,
-        "metadata": {}, "refunds": {"data": []},
+        "id": "ch_1", "payment_intent": "pi_r", "amount": 2900, "amount_refunded": 2900,
+        "metadata": {}, "refunds": {"data": [{"id": "re_1"}]},
     })
     client.post("/api/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "x"})
     db.expire_all()
     assert db.get(type(u), u.id).credit_balance == 0  # clamped, not -250
+
+
+def test_charge_partial_refund_prorates(client, db, _accept_sig, monkeypatch):
+    from tests.conftest import make_user
+    from app import credits
+    u = make_user(db, credits=0)
+    credits.grant(db, u, 6000, "purchase", ref_type="stripe_pi", ref_id="pi_pr")
+    db.commit()
+    _accept_sig["event"] = _event("evt_pr1", "charge.refunded", {
+        "id": "ch_pr", "payment_intent": "pi_pr", "amount": 39900, "amount_refunded": 2000,
+        "metadata": {}, "refunds": {"data": [{"id": "re_a"}]},
+    })
+    client.post("/api/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "x"})
+    db.expire_all()
+    assert db.get(type(u), u.id).credit_balance == 6000 - 301  # round(6000*2000/39900)
+
+    # a second, distinct partial refund on the same charge is not deduped away
+    _accept_sig["event"] = _event("evt_pr2", "charge.refunded", {
+        "id": "ch_pr", "payment_intent": "pi_pr", "amount": 39900, "amount_refunded": 2000,
+        "metadata": {}, "refunds": {"data": [{"id": "re_a"}, {"id": "re_b"}]},
+    })
+    client.post("/api/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "x"})
+    db.expire_all()
+    assert db.get(type(u), u.id).credit_balance == 6000 - 301 - 301
+    assert db.query(CreditTransaction).filter_by(reason="refund").count() == 2
+
+
+def test_invoice_paid_subscription_without_sub_id_fails_loudly(client, db, _accept_sig):
+    _accept_sig["event"] = _event("evt_inv_nosub", "invoice.paid", {
+        "id": "in_nosub", "billing_reason": "subscription_cycle",
+        "lines": {"data": []},
+    })
+    r = client.post("/api/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "x"})
+    assert r.status_code == 500
+    assert db.get(StripeEvent, "evt_inv_nosub").processed_at is None
+
+
+def test_invoice_paid_non_subscription_invoice_returns_quietly(client, db, _accept_sig):
+    _accept_sig["event"] = _event("evt_inv_manual", "invoice.paid", {
+        "id": "in_manual", "billing_reason": "manual",
+        "lines": {"data": []},
+    })
+    r = client.post("/api/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "x"})
+    assert r.status_code == 200
+    assert db.get(StripeEvent, "evt_inv_manual").processed_at is not None
 
 
 def test_invoice_paid_upserts_missing_local_subscription(client, db, _accept_sig, monkeypatch):
