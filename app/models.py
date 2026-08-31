@@ -28,6 +28,8 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     credit_balance: Mapped[int] = mapped_column(Integer, default=0)
+    stripe_customer_id: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
     documents: Mapped[list["Document"]] = relationship(back_populates="user")
@@ -72,6 +74,32 @@ class CreditTransaction(Base):
     ref_id: Mapped[str] = mapped_column(String(36), default="")
     note: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    stripe_subscription_id: Mapped[str] = mapped_column(String(64), unique=True)
+    plan_id: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(20), default="incomplete")
+    current_period_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, onupdate=now)
+
+
+class StripeEvent(Base):
+    __tablename__ = "stripe_events"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    type: Mapped[str] = mapped_column(String(64))
+    payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    error: Mapped[str] = mapped_column(String(500), default="")
 
 
 class SchemaMigration(Base):

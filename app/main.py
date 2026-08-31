@@ -51,6 +51,7 @@ def _migrate() -> None:
         "ALTER TABLE segments ALTER COLUMN confidence_score TYPE double precision",
         "ALTER TABLE ai_suggestions ALTER COLUMN confidence TYPE double precision",
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS tags JSON DEFAULT '[]'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(64)",
     ]
     with engine.begin() as conn:
         for stmt in stmts:
