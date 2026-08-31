@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from app.models import Subscription, StripeEvent, User
 
 

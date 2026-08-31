@@ -1,4 +1,3 @@
-from sqlalchemy import text
 from app import migrations
 from app.models import User, CreditTransaction
 
