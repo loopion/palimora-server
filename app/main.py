@@ -52,13 +52,17 @@ def _migrate() -> None:
         "ALTER TABLE ai_suggestions ALTER COLUMN confidence TYPE double precision",
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS tags JSON DEFAULT '[]'",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(64)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_stripe_customer_id ON users (stripe_customer_id)",
     ]
-    with engine.begin() as conn:
-        for stmt in stmts:
-            try:
+    for stmt in stmts:
+        # Each statement in its own transaction: on Postgres a single failing
+        # statement poisons the surrounding transaction and would silently skip
+        # every later statement (and then throw at COMMIT).
+        try:
+            with engine.begin() as conn:
                 conn.execute(text(stmt))
-            except Exception:
-                pass  # already migrated (sqlite dev) or column already float
+        except Exception:
+            pass  # already migrated (sqlite dev) or column already float
 
     from . import migrations as _mig
     with engine.begin() as conn:
