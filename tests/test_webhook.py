@@ -93,22 +93,30 @@ def test_charge_partial_refund_prorates(client, db, _accept_sig, monkeypatch):
     u = make_user(db, credits=0)
     credits.grant(db, u, 6000, "purchase", ref_type="stripe_pi", ref_id="pi_pr")
     db.commit()
+    # first partial refund €20 of €399 -> round(6000*2000/39900) = 301
     _accept_sig["event"] = _event("evt_pr1", "charge.refunded", {
         "id": "ch_pr", "payment_intent": "pi_pr", "amount": 39900, "amount_refunded": 2000,
         "metadata": {}, "refunds": {"data": [{"id": "re_a"}]},
     })
     client.post("/api/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "x"})
     db.expire_all()
-    assert db.get(type(u), u.id).credit_balance == 6000 - 301  # round(6000*2000/39900)
+    assert db.get(type(u), u.id).credit_balance == 6000 - 301
 
-    # a second, distinct partial refund on the same charge is not deduped away
+    # redelivery of event 1 (same refund id) revokes nothing
+    client.post("/api/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "x"})
+    db.expire_all()
+    assert db.get(type(u), u.id).credit_balance == 6000 - 301
+    assert db.query(CreditTransaction).filter_by(reason="refund").count() == 1
+
+    # second partial refund: amount_refunded is CUMULATIVE (4000), new refund re_b
+    # at data[0] (Stripe lists newest-first) -> target 602, already 301 -> 301 more
     _accept_sig["event"] = _event("evt_pr2", "charge.refunded", {
-        "id": "ch_pr", "payment_intent": "pi_pr", "amount": 39900, "amount_refunded": 2000,
-        "metadata": {}, "refunds": {"data": [{"id": "re_a"}, {"id": "re_b"}]},
+        "id": "ch_pr", "payment_intent": "pi_pr", "amount": 39900, "amount_refunded": 4000,
+        "metadata": {}, "refunds": {"data": [{"id": "re_b"}, {"id": "re_a"}]},
     })
     client.post("/api/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "x"})
     db.expire_all()
-    assert db.get(type(u), u.id).credit_balance == 6000 - 301 - 301
+    assert db.get(type(u), u.id).credit_balance == 6000 - 602
     assert db.query(CreditTransaction).filter_by(reason="refund").count() == 2
 
 

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -241,23 +242,36 @@ def _on_charge_refunded(db: Session, obj: dict) -> None:
     if not grant:
         return
     user = _user_or_raise(db, grant.user_id)
-    refunded = obj.get("amount_refunded") or 0
+    # Stripe sends the charge object: amount_refunded is CUMULATIVE (total
+    # refunded on this charge so far), not this refund's delta.
     total = obj.get("amount") or 0
-    credits_to_revoke = round(grant.delta * refunded / total) if total else grant.delta
-    take = min(credits_to_revoke, user.credit_balance)
+    refunded = obj.get("amount_refunded") or 0
+    target = round(grant.delta * refunded / total) if total else grant.delta
+    # credits already revoked for this charge (refund deltas are negative)
+    already = -(db.query(func.coalesce(func.sum(CreditTransaction.delta), 0))
+                .filter(CreditTransaction.reason == "refund",
+                        CreditTransaction.ref_id.like(f"{pi}:%")).scalar() or 0)
+    # pick the new refund: first id with no existing ledger row for it
+    refund_ids = [r["id"] for r in (obj.get("refunds") or {}).get("data", [])]
+    new_refund_id = next(
+        (rid for rid in refund_ids
+         if not db.query(CreditTransaction)
+                  .filter_by(ref_id=f"{pi}:{rid}", reason="refund").first()),
+        None,
+    )
+    if new_refund_id is None:
+        new_refund_id = refund_ids[0] if refund_ids else obj["id"]
+    ref_id = f"{pi}:{new_refund_id}"
+    take = min(target - already, user.credit_balance)
     if take <= 0:
         return
-    try:
-        refund_id = obj["refunds"]["data"][-1]["id"]
-    except (KeyError, IndexError, TypeError):
-        refund_id = obj["id"]
-    _grant_once(db, user, -take, "refund", ref_type="stripe_refund", ref_id=refund_id)
-    if take < credits_to_revoke:
+    _grant_once(db, user, -take, "refund", ref_type="stripe_refund", ref_id=ref_id)
+    if take < target - already:
         # record the clamp for audit
         last = (db.query(CreditTransaction)
-                .filter_by(ref_id=refund_id, reason="refund").first())
+                .filter_by(ref_id=ref_id, reason="refund").first())
         if last:
-            last.note = f"clamped: owed {credits_to_revoke}, took {take}"
+            last.note = f"clamped: owed {target - already}, took {take}"
 
 
 _HANDLERS = {
