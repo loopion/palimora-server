@@ -10,10 +10,14 @@ Backend suite: 46 passed. Frontend: 7 passed, `vite build` OK.
 2. Rebase arithmetic caveat: after `rebase_credits_v2` runs, a user's
    `credit_balance` becomes the sum of the per-row `trunc(delta/10)` of their
    ledger entries. For accounts with many small (sub-10-point) entries this can
-   differ from a naive `floor(old_balance/10)` by 1–2 credits. If you want to
-   avoid support questions, set `REBASE_TOPUP_TO=100` for the first deploy so
-   every active user is brought up to at least 100 credits; revert it to `0`
-   afterward.
+   differ from a naive `floor(old_balance/10)` by 1–2 credits.
+3. `REBASE_TOPUP_TO=100` is **required**, not cosmetic, for the rebase deploy.
+   `signup_bonus` stays 100 and `page_cost` is now 1, so a brand-new signup gets
+   100 free pages. A migrated beta user's old 100-point welcome bonus becomes
+   just 10 credits after the `/10` rebase — 10x worse off than a new user for the
+   same intended grant. Set `REBASE_TOPUP_TO=100` so every existing active user is
+   brought up to at least 100 credits, keeping both cohorts consistent. Leaving it
+   at `0` ships that 10x inequity to every existing user.
 
 ## Stripe test dashboard
 3. Create 4 Prices (EUR): starter €29 one-shot, chercheur €119 one-shot,
@@ -30,7 +34,8 @@ Backend suite: 46 passed. Frontend: 7 passed, `vite build` OK.
 STRIPE_SECRET_KEY
 STRIPE_PUBLISHABLE_KEY
 STRIPE_WEBHOOK_SECRET
-STRIPE_TAX_ENABLED=true
+STRIPE_TAX_ENABLED=false   # franchise-de-TVA: tax always 0; automatic_tax on a
+                           # customerless PaymentIntent 502s the purchase flow
 STRIPE_PRICE_STARTER
 STRIPE_PRICE_CHERCHEUR
 STRIPE_PRICE_ARCHIVISTE
@@ -41,7 +46,7 @@ BILLING_ENTITY_COUNTRY=FR
 PAGE_COST_POINTS=1
 AI_CORRECTION_COST_POINTS=0
 SIGNUP_BONUS_POINTS=100
-REBASE_TOPUP_TO=0   # set to 100 for one deploy to top existing users up (see above)
+REBASE_TOPUP_TO=100   # required for the rebase deploy — see "Before deploying" #3
 ```
 
 ## After deploy — smoke test
