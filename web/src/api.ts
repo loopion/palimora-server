@@ -42,12 +42,62 @@ async function request<T>(path: string, options: Omit<RequestInit, 'body'> & { b
   return data as T
 }
 
+export interface BillingApi {
+  catalogue(): Promise<BillingCatalogue>
+  status(): Promise<BillingStatus>
+  intent(packId: string): Promise<{ client_secret: string; amount: number; currency: string }>
+  subscribe(planId: string): Promise<{ client_secret: string; subscription_id: string }>
+  cancel(): Promise<{ status: string }>
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: body !== undefined ? body : {} }),
   patch: <T>(path: string, body: unknown) => request<T>(path, { method: 'PATCH', body }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  billing: {
+    catalogue: () => request<BillingCatalogue>('/api/billing/catalogue'),
+    status: () => request<BillingStatus>('/api/billing/status'),
+    intent: (packId: string) =>
+      request<{ client_secret: string; amount: number; currency: string }>(
+        '/api/billing/intent', { method: 'POST', body: { pack_id: packId } }),
+    subscribe: (planId: string) =>
+      request<{ client_secret: string; subscription_id: string }>(
+        '/api/billing/subscribe', { method: 'POST', body: { plan_id: planId } }),
+    cancel: () =>
+      request<{ status: string }>('/api/billing/cancel', { method: 'POST', body: {} }),
+  } as BillingApi,
+}
+
+export interface BillingPack {
+  id: string
+  kind: 'one_shot' | 'subscription'
+  credits: number
+  amount_eur: number
+  price_per_page: number
+  label: string
+  stripe_price_id: string
+  interval?: 'month'
+}
+
+export interface BillingCatalogue {
+  packs: BillingPack[]
+  publishable_key: string
+  enabled: boolean
+}
+
+export interface BillingSubscription {
+  plan_id: string
+  status: string
+  current_period_end: string | null
+  cancel_at_period_end: boolean
+}
+
+export interface BillingStatus {
+  credit_balance: number
+  subscription: BillingSubscription | null
+  purchases: { reason: string; delta: number; created_at: string | null; note: string }[]
 }
 
 export interface Me {

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { getToken } from './api'
 import Admin from './pages/Admin'
+import Billing from './pages/Billing'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Station from './pages/Station'
@@ -21,6 +22,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/register" element={<Register />} />
         <Route path="/" element={<RequireAuth><Station /></RequireAuth>} />
         <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
+        <Route path="/billing" element={<RequireAuth><Billing /></RequireAuth>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

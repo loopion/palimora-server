@@ -12,7 +12,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import ai, credits, kraken, storage
+from . import ai, billing, credits, kraken, storage
 from .auth import (
     create_auth_token, get_admin_user, get_current_user, hash_password,
     issue_device_token, new_id, send_email, verify_password, consume_auth_token,
@@ -21,8 +21,8 @@ from .config import settings
 from .credits import InsufficientCredits
 from .db import Base, SessionLocal, engine, get_db
 from .models import (
-    AISuggestion, Device, Document, GlossaryEntry, Page, PageJob, Segment,
-    Transcription, User,
+    AISuggestion, CreditTransaction, Device, Document, GlossaryEntry, Page,
+    PageJob, Segment, StripeEvent, Subscription, Transcription, User,
 )
 from .ocr_service import enqueue_page_ocr
 
@@ -51,13 +51,22 @@ def _migrate() -> None:
         "ALTER TABLE segments ALTER COLUMN confidence_score TYPE double precision",
         "ALTER TABLE ai_suggestions ALTER COLUMN confidence TYPE double precision",
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS tags JSON DEFAULT '[]'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(64)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_stripe_customer_id ON users (stripe_customer_id)",
     ]
-    with engine.begin() as conn:
-        for stmt in stmts:
-            try:
+    for stmt in stmts:
+        # Each statement in its own transaction: on Postgres a single failing
+        # statement poisons the surrounding transaction and would silently skip
+        # every later statement (and then throw at COMMIT).
+        try:
+            with engine.begin() as conn:
                 conn.execute(text(stmt))
-            except Exception:
-                pass  # already migrated (sqlite dev) or column already float
+        except Exception:
+            pass  # already migrated (sqlite dev) or column already float
+
+    from . import migrations as _mig
+    with engine.begin() as conn:
+        _mig.run_once(conn, "rebase_credits_v2", _mig.rebase_credits_v2)
 
 
 # ---------------------------------------------------------------- health
@@ -294,10 +303,13 @@ def _me_out(user: User) -> MeOut:
     )
 
 
+app.include_router(billing.router)
+app.include_router(billing.webhook_router)
+
+
 # ---------------------------------------------------------------- usage
 @app.get("/api/usage")
 def usage(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    from .models import CreditTransaction
     txs = (
         db.query(CreditTransaction)
         .filter_by(user_id=user.id)
@@ -309,6 +321,8 @@ def usage(db: Session = Depends(get_db), user: User = Depends(get_current_user))
         "balance": user.credit_balance,
         "page_cost": credits.page_cost(),
         "ai_correction_cost": credits.ai_cost(),
+        "stripe_publishable_key": settings.stripe_publishable_key,
+        "credits_per_page": credits.page_cost(),
         "transactions": [
             {"delta": t.delta, "balance_after": t.balance_after, "reason": t.reason,
              "note": t.note, "created_at": t.created_at.isoformat()}
@@ -731,6 +745,7 @@ def ai_suggest(page_id: str, payload: SuggestIn,
     if not text:
         raise HTTPException(status_code=400, detail="Page vide")
     try:
+        # ai_cost() is 0 in the current pricing (AI correction free) -> no-op.
         credits.charge(db, user, credits.ai_cost(), "ai_correction",
                        ref_type="page", ref_id=page.id, note="Correction IA")
     except InsufficientCredits as exc:
@@ -924,6 +939,61 @@ def admin_stats(db: Session = Depends(get_db), admin: User = Depends(get_admin_u
         "pages_error": db.query(Page).filter_by(processing_status="error").count(),
         "pages_total": db.query(Page).count(),
         "credits_in_circulation": db.query(func.sum(User.credit_balance)).scalar() or 0,
+    }
+
+
+@app.get("/api/admin/billing/events")
+def admin_billing_events(failed: int = 0, db: Session = Depends(get_db),
+                         admin: User = Depends(get_admin_user)):
+    q = db.query(StripeEvent)
+    if failed:
+        q = q.filter(StripeEvent.processed_at.is_(None), StripeEvent.error != "")
+    rows = q.order_by(StripeEvent.received_at.desc()).limit(100).all()
+    return {"events": [
+        {"id": e.id, "type": e.type, "error": e.error,
+         "received_at": e.received_at.isoformat() if e.received_at else None,
+         "processed": e.processed_at is not None}
+        for e in rows
+    ]}
+
+
+@app.post("/api/admin/billing/events/{event_id}/replay")
+def admin_billing_replay(event_id: str, db: Session = Depends(get_db),
+                         admin: User = Depends(get_admin_user)):
+    row = db.get(StripeEvent, event_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Événement inconnu")
+    try:
+        billing._handle_event(db, row.payload_json)
+        row.processed_at = datetime.now(timezone.utc)
+        row.error = ""
+        db.commit()
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        row = db.get(StripeEvent, event_id)
+        row.error = str(e)[:500]
+        row.processed_at = None
+        db.commit()
+        raise HTTPException(status_code=500, detail=str(e)[:200]) from e
+    return {"status": "processed"}
+
+
+@app.get("/api/admin/users/{user_id}/billing")
+def admin_user_billing(user_id: str, db: Session = Depends(get_db),
+                       admin: User = Depends(get_admin_user)):
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Utilisateur inconnu")
+    sub = (db.query(Subscription).filter_by(user_id=user_id)
+           .order_by(Subscription.created_at.desc()).first())
+    purchases = (db.query(CreditTransaction).filter_by(user_id=user_id)
+                 .order_by(CreditTransaction.created_at.desc()).limit(20).all())
+    return {
+        "credit_balance": target.credit_balance,
+        "subscription": billing._sub_dict(sub),
+        "purchases": [{"reason": p.reason, "delta": p.delta, "note": p.note,
+                       "created_at": p.created_at.isoformat() if p.created_at else None}
+                      for p in purchases],
     }
 
 

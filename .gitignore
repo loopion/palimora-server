@@ -9,3 +9,6 @@ smoke.db
 
 .omc/
 web/.omc/
+.venv/
+__pycache__/
+.pytest_cache/

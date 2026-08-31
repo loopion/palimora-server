@@ -52,9 +52,9 @@ class Settings:
         "image/heic", "image/heif", "application/pdf",
     )
 
-    # Credits (integer points: 10 points = 1 Kraken page, 1 point = 1 AI correction)
-    page_cost: int = _int("PAGE_COST_POINTS", 10)
-    ai_correction_cost: int = _int("AI_CORRECTION_COST_POINTS", 1)
+    # Credits (1 credit = 1 Kraken page; AI correction is free)
+    page_cost: int = _int("PAGE_COST_POINTS", 1)
+    ai_correction_cost: int = _int("AI_CORRECTION_COST_POINTS", 0)
     signup_bonus: int = _int("SIGNUP_BONUS_POINTS", 100)
 
     # AI correction (OpenAI-compatible)
@@ -75,6 +75,28 @@ class Settings:
         for e in os.getenv("ADMIN_EMAILS", "").split(",")
         if e.strip()
     ]
+    # Stripe (test mode)
+    stripe_secret_key: str = os.getenv("STRIPE_SECRET_KEY", "")
+    stripe_publishable_key: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+    stripe_webhook_secret: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+    stripe_tax_enabled: bool = os.getenv("STRIPE_TAX_ENABLED", "false").lower() == "true"
+    stripe_price_ids: dict = {
+        "starter": os.getenv("STRIPE_PRICE_STARTER", ""),
+        "chercheur": os.getenv("STRIPE_PRICE_CHERCHEUR", ""),
+        "archiviste": os.getenv("STRIPE_PRICE_ARCHIVISTE", ""),
+        "atelier": os.getenv("STRIPE_PRICE_ATELIER", ""),
+    }
+    rebase_topup_to: int = _int("REBASE_TOPUP_TO", 0)
+
+    # Billing entity (receipts / future invoices)
+    billing_entity_name: str = os.getenv("BILLING_ENTITY_NAME", "Palimora")
+    billing_entity_address: str = os.getenv("BILLING_ENTITY_ADDRESS", "")
+    billing_entity_country: str = os.getenv("BILLING_ENTITY_COUNTRY", "FR")
+    billing_vat_note: str = os.getenv("BILLING_VAT_NOTE", "TVA non applicable, art. 293 B du CGI")
+
+    @property
+    def stripe_enabled(self) -> bool:
+        return bool(self.stripe_secret_key and self.stripe_webhook_secret)
 
 
 settings = Settings()
