@@ -38,12 +38,22 @@ function CheckoutForm({ onDone }: { onDone: () => void }) {
   )
 }
 
+const REASON_LABELS: Record<string, string> = {
+  purchase: 'Achat',
+  subscription_grant: 'Abonnement',
+  refund: 'Remboursement',
+  rebase_topup: 'Ajustement',
+}
+
 export default function Billing() {
   const [cat, setCat] = useState<BillingCatalogue | null>(null)
   const [status, setStatus] = useState<BillingStatus | null>(null)
   const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [selected, setSelected] = useState<BillingPack | null>(null)
   const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
+  const [confirmingCancel, setConfirmingCancel] = useState(false)
+  const [justPaid, setJustPaid] = useState(false)
 
   const stripePromise = useMemo<Promise<Stripe | null> | null>(
     () => (cat?.publishable_key ? loadStripe(cat.publishable_key) : null), [cat?.publishable_key])
@@ -52,26 +62,46 @@ export default function Billing() {
     .then(([c, s]) => { setCat(c); setStatus(s) })
 
   useEffect(() => { reload() }, [])
+
+  // Return from Stripe redirect (?done=1): poll the balance for a short while.
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('done')) {
-      setMsg('Paiement reçu — les crédits arrivent dans quelques secondes.')
-      const t = setInterval(() => api.billing.status().then(setStatus), 2500)
-      setTimeout(() => clearInterval(t), 20000)
-    }
+    if (!new URLSearchParams(window.location.search).get('done')) return
+    setMsg('Paiement reçu — les crédits arrivent dans quelques secondes.')
+    const t = setInterval(() => api.billing.status().then(setStatus).catch(() => {}), 2500)
+    const stop = setTimeout(() => clearInterval(t), 20000)
+    return () => { clearInterval(t); clearTimeout(stop) }
   }, [])
 
+  // In-page payment confirmed (redirect: 'if_required'): poll until unmount / timeout.
+  useEffect(() => {
+    if (!justPaid) return
+    const t = setInterval(() => api.billing.status().then(setStatus).catch(() => {}), 2000)
+    const stop = setTimeout(() => { clearInterval(t); setJustPaid(false) }, 20000)
+    return () => { clearInterval(t); clearTimeout(stop) }
+  }, [justPaid])
+
   async function pick(p: BillingPack) {
-    setSelected(p); setClientSecret(null); setMsg('')
-    const r = p.kind === 'subscription'
-      ? await api.billing.subscribe(p.id)
-      : await api.billing.intent(p.id)
-    setClientSecret(r.client_secret)
+    setSelected(p); setClientSecret(null); setMsg(''); setErr('')
+    try {
+      const r = p.kind === 'subscription'
+        ? await api.billing.subscribe(p.id)
+        : await api.billing.intent(p.id)
+      setClientSecret(r.client_secret)
+    } catch (e: any) {
+      setErr(e?.message || 'Impossible de démarrer le paiement.')
+    }
   }
 
   async function cancelSub() {
-    await api.billing.cancel()
-    setMsg('Abonnement résilié à la fin de la période.')
-    reload()
+    setConfirmingCancel(false)
+    setErr('')
+    try {
+      await api.billing.cancel()
+      setMsg('Abonnement résilié à la fin de la période.')
+      reload()
+    } catch (e: any) {
+      setErr(e?.message || 'Échec de la résiliation.')
+    }
   }
 
   if (!cat || !status) return <div className="p-8 text-slate-400">Chargement…</div>
@@ -88,6 +118,7 @@ export default function Billing() {
 
       <p className="text-sm text-slate-500 mb-4">1 crédit = 1 page. La correction IA est offerte.</p>
       {msg && <p className="text-sm text-emerald-700 bg-emerald-50 rounded-md p-2 mb-4">{msg}</p>}
+      {err && <p className="text-sm text-red-600 bg-red-50 rounded-md p-2 mb-4">{err}</p>}
 
       {!cat.enabled && (
         <p className="text-sm text-amber-700 bg-amber-50 rounded-md p-3">
@@ -100,7 +131,15 @@ export default function Billing() {
           Abonnement <b>{status.subscription.plan_id}</b> — {status.subscription.status}
           {status.subscription.cancel_at_period_end
             ? ' (résiliation programmée)'
-            : <button className="ml-3 text-red-600" onClick={cancelSub}>Résilier</button>}
+            : confirmingCancel
+              ? (
+                <span className="ml-3 inline-flex items-center gap-2">
+                  Résilier l'abonnement ?
+                  <button className="text-red-600 font-medium" onClick={cancelSub}>Oui, résilier</button>
+                  <button className="text-slate-500" onClick={() => setConfirmingCancel(false)}>Annuler</button>
+                </span>
+              )
+              : <button className="ml-3 text-red-600" onClick={() => setConfirmingCancel(true)}>Résilier</button>}
         </div>
       )}
 
@@ -134,10 +173,28 @@ export default function Billing() {
             <CheckoutForm onDone={() => {
               setClientSecret(null)
               setMsg('Paiement confirmé — mise à jour du solde…')
-              const t = setInterval(() => api.billing.status().then(setStatus), 2000)
-              setTimeout(() => clearInterval(t), 20000)
+              setJustPaid(true)
             }} />
           </Elements>
+        </div>
+      )}
+
+      {status.purchases.length > 0 && (
+        <div className="mt-6">
+          <h2 className="text-sm font-semibold mb-2">Historique</h2>
+          <ul className="text-sm divide-y border rounded-lg">
+            {status.purchases.map((p, i) => (
+              <li key={i} className="flex items-center justify-between px-3 py-2">
+                <span>{REASON_LABELS[p.reason] ?? p.reason}</span>
+                <span className={p.delta >= 0 ? 'text-emerald-700' : 'text-red-600'}>
+                  {p.delta >= 0 ? '+' : ''}{p.delta} crédits
+                </span>
+                <span className="text-slate-400">
+                  {p.created_at ? new Date(p.created_at).toLocaleDateString('fr-FR') : '—'}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>
