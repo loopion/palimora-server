@@ -23,7 +23,7 @@ def test_stripe_settings_from_env(monkeypatch):
     importlib.reload(config)
     assert config.settings.stripe_enabled is True
     assert config.settings.stripe_price_ids["starter"] == "price_s"
-    assert config.settings.stripe_tax_enabled is True  # default
+    assert config.settings.stripe_tax_enabled is False  # default (franchise-de-TVA)
 
 
 def test_stripe_disabled_without_secret(monkeypatch):

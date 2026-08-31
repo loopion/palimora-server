@@ -42,19 +42,32 @@ async function request<T>(path: string, options: Omit<RequestInit, 'body'> & { b
   return data as T
 }
 
+export interface BillingApi {
+  catalogue(): Promise<BillingCatalogue>
+  status(): Promise<BillingStatus>
+  intent(packId: string): Promise<{ client_secret: string; amount: number; currency: string }>
+  subscribe(planId: string): Promise<{ client_secret: string; subscription_id: string }>
+  cancel(): Promise<{ status: string }>
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: body !== undefined ? body : {} }),
   patch: <T>(path: string, body: unknown) => request<T>(path, { method: 'PATCH', body }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
-  billing: undefined as unknown as {
-    catalogue: () => Promise<BillingCatalogue>
-    status: () => Promise<BillingStatus>
-    intent: (packId: string) => Promise<{ client_secret: string; amount: number; currency: string }>
-    subscribe: (planId: string) => Promise<{ client_secret: string; subscription_id: string }>
-    cancel: () => Promise<{ status: string }>
-  },
+  billing: {
+    catalogue: () => request<BillingCatalogue>('/api/billing/catalogue'),
+    status: () => request<BillingStatus>('/api/billing/status'),
+    intent: (packId: string) =>
+      request<{ client_secret: string; amount: number; currency: string }>(
+        '/api/billing/intent', { method: 'POST', body: { pack_id: packId } }),
+    subscribe: (planId: string) =>
+      request<{ client_secret: string; subscription_id: string }>(
+        '/api/billing/subscribe', { method: 'POST', body: { plan_id: planId } }),
+    cancel: () =>
+      request<{ status: string }>('/api/billing/cancel', { method: 'POST', body: {} }),
+  } as BillingApi,
 }
 
 export interface BillingPack {
@@ -85,18 +98,6 @@ export interface BillingStatus {
   credit_balance: number
   subscription: BillingSubscription | null
   purchases: { reason: string; delta: number; created_at: string | null; note: string }[]
-}
-
-api.billing = {
-  catalogue: () => api.get<BillingCatalogue>('/api/billing/catalogue'),
-  status: () => api.get<BillingStatus>('/api/billing/status'),
-  intent: (packId: string) =>
-    api.post<{ client_secret: string; amount: number; currency: string }>(
-      '/api/billing/intent', { pack_id: packId }),
-  subscribe: (planId: string) =>
-    api.post<{ client_secret: string; subscription_id: string }>(
-      '/api/billing/subscribe', { plan_id: planId }),
-  cancel: () => api.post<{ status: string }>('/api/billing/cancel'),
 }
 
 export interface Me {
