@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { getToken } from './api'
+import ImpersonationBanner from './components/ImpersonationBanner'
 import Admin from './pages/Admin'
 import Billing from './pages/Billing'
 import Login from './pages/Login'
@@ -17,6 +18,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
+      <ImpersonationBanner />
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
