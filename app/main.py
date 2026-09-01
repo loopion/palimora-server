@@ -42,7 +42,7 @@ _IMPERSONATION_BLOCKED = (
     re.compile(r"^/api/documents/[^/]+/finalize$"),
     re.compile(r"^/api/pages/[^/]+/reocr$"),
 )
-_WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+_READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 def _is_impersonation_control(path: str) -> bool:
@@ -52,7 +52,7 @@ def _is_impersonation_control(path: str) -> bool:
 @app.middleware("http")
 async def impersonation_guard(request: Request, call_next):
     impersonate = request.headers.get("X-Impersonate")
-    is_write = request.method in _WRITE_METHODS
+    is_write = request.method not in _READ_METHODS
     path = request.url.path
     relevant = bool(impersonate) and is_write and not _is_impersonation_control(path)
 
@@ -64,7 +64,18 @@ async def impersonation_guard(request: Request, call_next):
 
     response = await call_next(request)
 
-    # Task 5 adds request-audit logging here.
+    if relevant:
+        actor_id = getattr(request.state, "impersonator_id", None)
+        target_id = getattr(request.state, "impersonated_id", None)
+        if actor_id:
+            _audit_record(
+                actor_user_id=actor_id,
+                target_user_id=target_id,
+                event="request",
+                method=request.method,
+                path=path,
+                status_code=response.status_code,
+            )
     return response
 
 

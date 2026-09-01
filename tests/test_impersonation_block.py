@@ -41,6 +41,21 @@ def test_benign_patch_allowed_while_impersonating(client, db):
     assert r.status_code == 200
 
 
+def test_ai_suggest_not_blocked_while_impersonating(client, db):
+    admin = make_user(db, email="admin@test.fr", is_admin=True)
+    target = make_user(db, email="user@test.fr")
+    r = client.post("/api/pages/missing/ai-suggest", json={},
+                    headers=_imp(db, admin, target.id))
+    assert r.status_code != 403
+
+
+def test_get_billing_status_not_blocked_while_impersonating(client, db):
+    admin = make_user(db, email="admin@test.fr", is_admin=True)
+    target = make_user(db, email="user@test.fr")
+    r = client.get("/api/billing/status", headers=_imp(db, admin, target.id))
+    assert r.status_code != 403
+
+
 def test_finalize_not_blocked_without_header(client, db):
     # a normal user hitting finalize on a missing doc gets 404, not the 403 block
     u = make_user(db, email="user@test.fr", credits=100)
