@@ -9,6 +9,23 @@ export function setToken(token: string | null) {
   else localStorage.removeItem(TOKEN_KEY)
 }
 
+const IMPERSONATE_KEY = 'palimora_impersonate'
+
+export function getImpersonation(): { id: string; email: string } | null {
+  const raw = localStorage.getItem(IMPERSONATE_KEY)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+export function setImpersonation(v: { id: string; email: string } | null) {
+  if (v) localStorage.setItem(IMPERSONATE_KEY, JSON.stringify(v))
+  else localStorage.removeItem(IMPERSONATE_KEY)
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -21,6 +38,8 @@ async function request<T>(path: string, options: Omit<RequestInit, 'body'> & { b
   const token = getToken()
   const headers: Record<string, string> = { ...(options.headers as any) }
   if (token) headers['Authorization'] = `Bearer ${token}`
+  const impersonation = getImpersonation()
+  if (impersonation) headers['X-Impersonate'] = impersonation.id
   let body: BodyInit | undefined
   if (options.body !== undefined && typeof options.body !== 'string' && !(options.body instanceof Blob)) {
     headers['Content-Type'] = 'application/json'
@@ -29,7 +48,7 @@ async function request<T>(path: string, options: Omit<RequestInit, 'body'> & { b
     body = options.body as BodyInit
   }
   const resp = await fetch(path, { ...options, headers, body })
-  if (resp.status === 401 && !path.includes('/auth/')) {
+  if (resp.status === 401 && !path.includes('/auth/') && !getImpersonation()) {
     setToken(null)
     window.location.href = '/login'
     throw new ApiError(401, 'Session expirée')
@@ -37,7 +56,12 @@ async function request<T>(path: string, options: Omit<RequestInit, 'body'> & { b
   const text = await resp.text()
   const data = text ? JSON.parse(text) : null
   if (!resp.ok) {
-    throw new ApiError(resp.status, data?.detail || `Erreur ${resp.status}`)
+    const detail: string = data?.detail || ''
+    if (getImpersonation() && (resp.status === 404 || /impersonation/i.test(detail))) {
+      setImpersonation(null)
+      window.location.reload()
+    }
+    throw new ApiError(resp.status, detail || `Erreur ${resp.status}`)
   }
   return data as T
 }
