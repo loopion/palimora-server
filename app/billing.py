@@ -181,14 +181,34 @@ def _on_payment_intent_succeeded(db: Session, obj: dict) -> None:
                 ref_type="stripe_pi", ref_id=obj["id"])
 
 
+def _invoice_subscription_id(obj: dict) -> str | None:
+    """Top-level `subscription` on older API versions; moved under
+    `parent.subscription_details.subscription` on 2025-03+ (basil)."""
+    if obj.get("subscription"):
+        return obj["subscription"]
+    return ((obj.get("parent") or {}).get("subscription_details") or {}).get("subscription")
+
+
+def _invoice_price_id(obj: dict) -> str | None:
+    line = ((obj.get("lines") or {}).get("data") or [{}])[0]
+    price = line.get("price")
+    if price:
+        return price["id"] if isinstance(price, dict) else price
+    return ((line.get("pricing") or {}).get("price_details") or {}).get("price")
+
+
+def _invoice_subscription_metadata(obj: dict) -> dict:
+    return ((obj.get("parent") or {}).get("subscription_details") or {}).get("metadata") or {}
+
+
 def _on_invoice_paid(db: Session, obj: dict) -> None:
-    sub_id = obj.get("subscription")
+    sub_id = _invoice_subscription_id(obj)
     if not sub_id:
         if obj.get("billing_reason", "").startswith("subscription"):
             raise ValueError(
                 "invoice.paid for a subscription but no subscription id in payload")
         return
-    price_id = obj["lines"]["data"][0]["price"]["id"]
+    price_id = _invoice_price_id(obj)
     pack = pricing.pack_by_price_id(price_id)
     if not pack:
         raise ValueError(f"unknown price {price_id}")
@@ -204,11 +224,16 @@ def _on_invoice_paid(db: Session, obj: dict) -> None:
             row.current_period_end = period_end_dt
     else:
         # No local row (dashboard-created, lost insert, DB restore) — upsert it.
+        meta_user_id = _invoice_subscription_metadata(obj).get("user_id")
         customer_id = obj.get("customer")
-        user = (db.query(User).filter_by(stripe_customer_id=customer_id).first()
-                if customer_id else None)
+        user = None
+        if meta_user_id:
+            user = db.get(User, meta_user_id)
+        if not user and customer_id:
+            user = db.query(User).filter_by(stripe_customer_id=customer_id).first()
         if not user:
-            raise ValueError(f"no local subscription {sub_id} and no user for customer {customer_id}")
+            raise ValueError(
+                f"no local subscription {sub_id} and no user for customer {customer_id}")
         db.add(Subscription(user_id=user.id, stripe_subscription_id=sub_id,
                             plan_id=pack.id, status="active",
                             current_period_end=period_end_dt))
@@ -222,7 +247,11 @@ def _on_subscription_updated(db: Session, obj: dict) -> None:
         return
     row.status = obj.get("status", row.status)
     row.cancel_at_period_end = bool(obj.get("cancel_at_period_end"))
+    # top-level on older API versions; per-item on 2025-03+ (basil)
     period_end = obj.get("current_period_end")
+    if not period_end:
+        items = (obj.get("items") or {}).get("data") or []
+        period_end = items[0].get("current_period_end") if items else None
     if period_end:
         row.current_period_end = datetime.fromtimestamp(period_end, tz=timezone.utc)
 

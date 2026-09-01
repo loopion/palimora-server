@@ -69,6 +69,30 @@ def test_invoice_paid_grants_and_upserts_subscription(client, db, _accept_sig, m
     assert db.query(Subscription).filter_by(stripe_subscription_id="sub_1").one().status == "active"
 
 
+def test_invoice_paid_basil_payload_shape(client, db, _accept_sig, monkeypatch):
+    """2025-03+ (basil): subscription id and price id moved out of the top level."""
+    from tests.conftest import make_user
+    u = make_user(db, credits=0)
+    db.add(Subscription(user_id=u.id, stripe_subscription_id="sub_b",
+                        plan_id="atelier", status="incomplete"))
+    db.commit()
+    monkeypatch.setitem(billing.settings.stripe_price_ids, "atelier", "price_a")
+    _accept_sig["event"] = _event("evt_inv_b", "invoice.paid", {
+        "id": "in_b", "subscription": None, "billing_reason": "subscription_create",
+        "customer": "cus_b",
+        "parent": {"subscription_details": {
+            "subscription": "sub_b",
+            "metadata": {"user_id": u.id, "plan_id": "atelier"}}},
+        "lines": {"data": [{"pricing": {"price_details": {"price": "price_a"}}}]},
+        "period_end": 1893456000,
+    })
+    r = client.post("/api/stripe/webhook", content=b"{}", headers={"Stripe-Signature": "x"})
+    assert r.status_code == 200
+    db.expire_all()
+    assert db.get(type(u), u.id).credit_balance == 500
+    assert db.query(Subscription).filter_by(stripe_subscription_id="sub_b").one().status == "active"
+
+
 def test_charge_refunded_clamps_at_zero(client, db, _accept_sig, monkeypatch):
     from tests.conftest import make_user
     from app import credits
