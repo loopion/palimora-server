@@ -102,6 +102,23 @@ class StripeEvent(Base):
     error: Mapped[str] = mapped_column(String(500), default="")
 
 
+class AdminAuditLog(Base):
+    """Impersonation session boundaries + every mutating request made while an
+    admin is impersonating a user. Written by app.audit.record (own session)."""
+    __tablename__ = "admin_audit_log"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    actor_user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), index=True)
+    target_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), index=True, nullable=True)
+    event: Mapped[str] = mapped_column(String(20))  # impersonation.start|stop|request
+    method: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, index=True)
+
+
 class SchemaMigration(Base):
     __tablename__ = "schema_migrations"
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
