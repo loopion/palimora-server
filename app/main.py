@@ -1,18 +1,20 @@
 """Palimora Server — FastAPI app (API + static SPA)."""
 import io
 import os
+import re
 from datetime import datetime, timezone
 
 import pypdf
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import ai, billing, credits, kraken, storage
+from .audit import record as _audit_record
 from .auth import (
     create_auth_token, get_admin_user, get_current_user, hash_password,
     issue_device_token, new_id, send_email, verify_password, consume_auth_token,
@@ -33,6 +35,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_IMPERSONATION_BLOCKED = (
+    re.compile(r"^/api/billing/"),
+    re.compile(r"^/api/stripe/"),
+    re.compile(r"^/api/documents/[^/]+/finalize$"),
+    re.compile(r"^/api/pages/[^/]+/reocr$"),
+)
+_WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _is_impersonation_control(path: str) -> bool:
+    return path == "/api/admin/impersonate" or path.startswith("/api/admin/impersonate/")
+
+
+@app.middleware("http")
+async def impersonation_guard(request: Request, call_next):
+    impersonate = request.headers.get("X-Impersonate")
+    is_write = request.method in _WRITE_METHODS
+    path = request.url.path
+    relevant = bool(impersonate) and is_write and not _is_impersonation_control(path)
+
+    if relevant and any(p.search(path) for p in _IMPERSONATION_BLOCKED):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Action indisponible en mode impersonation"},
+        )
+
+    response = await call_next(request)
+
+    # Task 5 adds request-audit logging here.
+    return response
 
 
 @app.on_event("startup")
