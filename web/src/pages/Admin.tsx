@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api, setToken } from '../api'
+import { api, setImpersonation, setToken } from '../api'
 
 interface AdminUser {
   id: string; email: string; display_name: string
@@ -10,21 +10,30 @@ interface Stats {
   users: number; documents: number; pages_done: number
   pages_error: number; pages_total: number; credits_in_circulation: number
 }
+interface AuditRow {
+  id: string; created_at: string | null; event: string
+  method: string | null; path: string | null; status_code: number | null
+  actor_email: string | null; target_email: string | null
+}
 
 export default function Admin() {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
   const [grant, setGrant] = useState<Record<string, string>>({})
   const [toast, setToast] = useState('')
+  const [audit, setAudit] = useState<AuditRow[]>([])
+  const [impersonating, setImpersonating] = useState(false)
   const navigate = useNavigate()
 
   const refresh = useCallback(async () => {
-    const [u, s] = await Promise.all([
+    const [u, s, a] = await Promise.all([
       api.get<{ users: AdminUser[] }>('/api/admin/users'),
       api.get<Stats>('/api/admin/stats'),
+      api.get<{ rows: AuditRow[] }>('/api/admin/audit?limit=100'),
     ])
     setUsers(u.users)
     setStats(s)
+    setAudit(a.rows)
   }, [])
 
   useEffect(() => {
@@ -42,6 +51,20 @@ export default function Admin() {
     setToast('Crédits ajoutés')
     setTimeout(() => setToast(''), 2500)
     refresh()
+  }
+
+  async function impersonate(u: AdminUser) {
+    setImpersonating(true)
+    try {
+      await api.post(`/api/admin/impersonate/${u.id}`)
+      setImpersonation({ id: u.id, email: u.email })
+      // Hard reload so <ImpersonationBanner /> (mounted outside the router) re-evaluates.
+      window.location.assign('/')
+    } catch {
+      setToast("Erreur lors de l'impersonation")
+      setTimeout(() => setToast(''), 2500)
+      setImpersonating(false)
+    }
   }
 
   async function toggleActive(userId: string) {
@@ -82,6 +105,7 @@ export default function Admin() {
               <th className="p-2">Email</th><th className="p-2">Nom</th>
               <th className="p-2">Crédits</th><th className="p-2">Rôle</th>
               <th className="p-2">Statut</th><th className="p-2">Créditer</th>
+              <th className="p-2">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -106,6 +130,41 @@ export default function Admin() {
                             onClick={() => addCredits(u.id)}>OK</button>
                   </div>
                 </td>
+                <td className="p-2">
+                  {!u.is_admin && (
+                    <button className="text-indigo-600 disabled:opacity-50"
+                            disabled={impersonating} onClick={() => impersonate(u)}>
+                      Impersoner
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="px-4 pb-12">
+        <h2 className="mb-2 font-semibold">Journal d'impersonation</h2>
+        <table className="w-full bg-white rounded-lg border text-sm">
+          <thead>
+            <tr className="text-left text-slate-500 border-b">
+              <th className="p-2">Date</th><th className="p-2">Admin</th>
+              <th className="p-2">Cible</th><th className="p-2">Événement</th>
+              <th className="p-2">Méthode</th><th className="p-2">Chemin</th>
+              <th className="p-2">Statut</th>
+            </tr>
+          </thead>
+          <tbody>
+            {audit.map((r) => (
+              <tr key={r.id} className="border-b">
+                <td className="p-2">{r.created_at ? new Date(r.created_at).toLocaleString('fr-FR') : ''}</td>
+                <td className="p-2">{r.actor_email}</td>
+                <td className="p-2">{r.target_email}</td>
+                <td className="p-2">{r.event}</td>
+                <td className="p-2">{r.method}</td>
+                <td className="p-2 font-mono text-xs">{r.path}</td>
+                <td className="p-2">{r.status_code}</td>
               </tr>
             ))}
           </tbody>

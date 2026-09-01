@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import OpenSeadragon from 'openseadragon'
 import { Link, useNavigate } from 'react-router-dom'
-import { api, getToken, Me, PageDetail, PageSummary, QueueItem, Segment, setToken } from '../api'
+import { api, getImpersonation, getToken, Me, PageDetail, PageSummary, QueueItem, Segment, setToken } from '../api'
 import { usePrompt } from '../components/PromptModal'
 
 const statusBadge: Record<string, string> = {
@@ -195,7 +195,10 @@ export default function Station() {
           form.append('file', file)
           const posted = await fetch(`/api/pages/${up.page_id}/upload`, {
             method: 'POST', body: form,
-            headers: { Authorization: `Bearer ${getToken()}` },
+            headers: {
+              Authorization: `Bearer ${getToken()}`,
+              ...(getImpersonation() ? { 'X-Impersonate': getImpersonation()!.id } : {}),
+            },
           })
           if (!posted.ok) throw new Error(`Echec upload ${file.name} (${posted.status})`)
         }

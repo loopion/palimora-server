@@ -57,6 +57,19 @@ def bearer_token(request: Request) -> str | None:
     return request.headers.get("X-Api-Key") or None
 
 
+def resolve_impersonation_target(db: Session, target_id: str) -> User:
+    target = db.query(User).filter_by(id=target_id).one_or_none()
+    if not target or not target.is_active:
+        raise HTTPException(
+            status_code=404, detail="Utilisateur à impersoner introuvable"
+        )
+    if target.is_admin:
+        raise HTTPException(
+            status_code=403, detail="Impersonation d'un administrateur interdite"
+        )
+    return target
+
+
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     token = bearer_token(request)
     if not token:
@@ -64,6 +77,18 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = get_user_by_token(db, token)
     if not user:
         raise HTTPException(status_code=401, detail="Jeton invalide ou expiré")
+
+    impersonate = request.headers.get("X-Impersonate")
+    if impersonate and not request.url.path.startswith("/api/admin/impersonate"):
+        if not user.is_admin:
+            raise HTTPException(
+                status_code=403,
+                detail="Impersonation réservée aux administrateurs",
+            )
+        target = resolve_impersonation_target(db, impersonate)
+        request.state.impersonator_id = user.id
+        request.state.impersonated_id = target.id
+        return target
     return user
 
 
