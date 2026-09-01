@@ -62,12 +62,26 @@ async def impersonation_guard(request: Request, call_next):
             content={"detail": "Action indisponible en mode impersonation"},
         )
 
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception:
+        if relevant:
+            actor_id = getattr(request.state, "impersonator_id", None)
+            if actor_id is not None:
+                _audit_record(
+                    actor_user_id=actor_id,
+                    target_user_id=getattr(request.state, "impersonated_id", None),
+                    event="request",
+                    method=request.method,
+                    path=path,
+                    status_code=500,
+                )
+        raise
 
     if relevant:
         actor_id = getattr(request.state, "impersonator_id", None)
         target_id = getattr(request.state, "impersonated_id", None)
-        if actor_id:
+        if actor_id is not None:
             _audit_record(
                 actor_user_id=actor_id,
                 target_user_id=target_id,

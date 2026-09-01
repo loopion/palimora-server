@@ -1,5 +1,14 @@
+from fastapi import Depends
+
+from app.auth import get_current_user
+from app.main import app as _app
 from app.models import AdminAuditLog
 from tests.conftest import make_user, auth_headers
+
+
+@_app.post("/api/pages/{page_id}/_test_boom")
+def _boom(page_id: str, _u=Depends(get_current_user)):
+    raise RuntimeError("boom")
 
 
 def _imp(db, admin, target_id):
@@ -37,6 +46,35 @@ def test_blocked_route_not_logged_as_request(client, db):
                 headers=_imp(db, admin, target.id))
     db.expire_all()
     assert db.query(AdminAuditLog).filter_by(event="request").count() == 0
+
+
+def test_route_that_500s_still_writes_audit_row(_engine, _Session, monkeypatch, db):
+    from fastapi.testclient import TestClient
+    from app.db import get_db
+    from app import db as db_module
+
+    def _get_db():
+        session = _Session()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    _app.dependency_overrides[get_db] = _get_db
+    monkeypatch.setattr(db_module, "engine", _engine, raising=False)
+    admin = make_user(db, email="admin@test.fr", is_admin=True)
+    target = make_user(db, email="user@test.fr")
+    try:
+        with TestClient(_app, raise_server_exceptions=False) as c:
+            r = c.post("/api/pages/x/_test_boom",
+                       headers={**auth_headers(db, admin), "X-Impersonate": target.id})
+        assert r.status_code == 500
+    finally:
+        _app.dependency_overrides.clear()
+    db.expire_all()
+    row = db.query(AdminAuditLog).filter_by(event="request").one()
+    assert row.status_code == 500
+    assert row.actor_user_id == admin.id
 
 
 def test_non_admin_rejected_request_not_logged(client, db):
