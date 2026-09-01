@@ -43,6 +43,11 @@ _IMPERSONATION_BLOCKED = (
     re.compile(r"^/api/documents/[^/]+/finalize$"),
     re.compile(r"^/api/pages/[^/]+/reocr$"),
 )
+# Blocked only when a runtime condition holds (evaluated per request against settings).
+_IMPERSONATION_BLOCKED_DYNAMIC = (
+    (re.compile(r"^/api/pages/[^/]+/ai-suggest$"),
+     lambda: settings.ai_correction_cost > 0),
+)
 _READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
@@ -57,7 +62,11 @@ async def impersonation_guard(request: Request, call_next):
     path = request.url.path
     relevant = bool(impersonate) and is_write and not _is_impersonation_control(path)
 
-    if relevant and any(p.search(path) for p in _IMPERSONATION_BLOCKED):
+    blocked = relevant and (
+        any(p.search(path) for p in _IMPERSONATION_BLOCKED)
+        or any(p.search(path) and cond() for p, cond in _IMPERSONATION_BLOCKED_DYNAMIC)
+    )
+    if blocked:
         return JSONResponse(
             status_code=403,
             content={"detail": "Action indisponible en mode impersonation"},
@@ -1015,7 +1024,12 @@ def admin_start_impersonation(user_id: str, db: Session = Depends(get_db),
 @app.delete("/api/admin/impersonate", status_code=204)
 def admin_stop_impersonation(user_id: str | None = None, db: Session = Depends(get_db),
                              admin: User = Depends(get_admin_user)):
-    db.add(AdminAuditLog(actor_user_id=admin.id, target_user_id=user_id,
+    # Only record a target FK when it resolves to a real user; a stale id must not
+    # abort the stop (FK IntegrityError on Postgres) — the stop must always succeed.
+    target_id = None
+    if user_id and db.query(User).filter_by(id=user_id).one_or_none() is not None:
+        target_id = user_id
+    db.add(AdminAuditLog(actor_user_id=admin.id, target_user_id=target_id,
                          event="impersonation.stop"))
     db.commit()
 

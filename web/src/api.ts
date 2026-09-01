@@ -15,7 +15,8 @@ export function getImpersonation(): { id: string; email: string } | null {
   const raw = localStorage.getItem(IMPERSONATE_KEY)
   if (!raw) return null
   try {
-    return JSON.parse(raw)
+    const v = JSON.parse(raw)
+    return (v && typeof v === 'object' && typeof v.id === 'string') ? v : null
   } catch {
     return null
   }
@@ -48,7 +49,10 @@ async function request<T>(path: string, options: Omit<RequestInit, 'body'> & { b
     body = options.body as BodyInit
   }
   const resp = await fetch(path, { ...options, headers, body })
-  if (resp.status === 401 && !path.includes('/auth/') && !getImpersonation()) {
+  if (resp.status === 401 && !path.includes('/auth/')) {
+    // A bad impersonation target never yields 401 (it is 403/404), so a genuine
+    // 401 here means the admin's own token expired: drop everything and re-login.
+    setImpersonation(null)
     setToken(null)
     window.location.href = '/login'
     throw new ApiError(401, 'Session expirée')
@@ -57,7 +61,7 @@ async function request<T>(path: string, options: Omit<RequestInit, 'body'> & { b
   const data = text ? JSON.parse(text) : null
   if (!resp.ok) {
     const detail: string = data?.detail || ''
-    if (getImpersonation() && (resp.status === 404 || /impersonation/i.test(detail))) {
+    if (getImpersonation() && /imperson/i.test(detail)) {
       setImpersonation(null)
       window.location.reload()
     }

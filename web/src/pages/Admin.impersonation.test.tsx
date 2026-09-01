@@ -3,6 +3,8 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import Admin from './Admin'
+import ImpersonationBanner from '../components/ImpersonationBanner'
+import { setImpersonation } from '../api'
 
 const navigate = vi.fn()
 vi.mock('react-router-dom', async (orig) => ({
@@ -29,14 +31,22 @@ beforeEach(() => {
   }))
 })
 
-it('impersonate button stores target and navigates home', async () => {
+it('impersonate button stores target and hard-navigates home', async () => {
+  const assign = vi.fn()
+  vi.stubGlobal('location', { assign, href: '' } as any)
   render(<MemoryRouter><Admin /></MemoryRouter>)
   const btn = await screen.findByRole('button', { name: /impersoner/i })
   await userEvent.click(btn)
   await waitFor(() => {
     expect(localStorage.getItem('palimora_impersonate')).toContain('u1')
-    expect(navigate).toHaveBeenCalledWith('/')
+    expect(assign).toHaveBeenCalledWith('/')
   })
+})
+
+it('banner renders once a target is stored (post-reload state)', () => {
+  setImpersonation({ id: 'u1', email: 'user@test.fr' })
+  render(<MemoryRouter><ImpersonationBanner /><Admin /></MemoryRouter>)
+  expect(screen.getByText(/Vous agissez en tant que/i)).toBeInTheDocument()
 })
 
 it('failed impersonate shows toast and does not navigate', async () => {

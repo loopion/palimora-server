@@ -49,6 +49,17 @@ def test_ai_suggest_not_blocked_while_impersonating(client, db):
     assert r.status_code != 403
 
 
+def test_ai_suggest_blocked_while_impersonating_when_cost_positive(client, db, monkeypatch):
+    import app.main as main_mod
+    monkeypatch.setattr(main_mod.settings, "ai_correction_cost", 1)
+    admin = make_user(db, email="admin@test.fr", is_admin=True)
+    target = make_user(db, email="user@test.fr")
+    r = client.post("/api/pages/missing/ai-suggest", json={},
+                    headers=_imp(db, admin, target.id))
+    assert r.status_code == 403
+    assert r.json()["detail"] == "Action indisponible en mode impersonation"
+
+
 def test_get_billing_status_not_blocked_while_impersonating(client, db):
     admin = make_user(db, email="admin@test.fr", is_admin=True)
     target = make_user(db, email="user@test.fr")

@@ -38,10 +38,10 @@ describe('X-Impersonate header', () => {
 })
 
 describe('bad impersonation target', () => {
-  it('clears only the impersonation key on 404, keeps token', async () => {
+  it('clears only the impersonation key on a bad-target 404, keeps token', async () => {
     setImpersonation({ id: 'bad', email: 'x@test.fr' })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ detail: 'Utilisateur introuvable' }), { status: 404 })))
+      new Response(JSON.stringify({ detail: 'Utilisateur à impersoner introuvable' }), { status: 404 })))
     const reload = vi.fn()
     vi.stubGlobal('location', { reload } as any)
 
@@ -61,5 +61,30 @@ describe('bad impersonation target', () => {
     expect(getImpersonation()).toBeNull()
     expect(localStorage.getItem('palimora_token')).toBe('tok')
     expect(reload).toHaveBeenCalled()
+  })
+
+  it('keeps impersonation on an unrelated 404 (deleted document)', async () => {
+    setImpersonation({ id: 'u1', email: 'u@test.fr' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'Document introuvable' }), { status: 404 })))
+    const reload = vi.fn()
+    vi.stubGlobal('location', { reload } as any)
+    await api.get('/api/documents/x').catch(() => {})
+    expect(getImpersonation()).toEqual({ id: 'u1', email: 'u@test.fr' })
+    expect(reload).not.toHaveBeenCalled()
+  })
+})
+
+describe('401 during impersonation', () => {
+  it('clears token + impersonation and redirects to /login', async () => {
+    setImpersonation({ id: 'u1', email: 'u@test.fr' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'Jeton invalide ou expiré' }), { status: 401 })))
+    const loc = { href: '' } as any
+    vi.stubGlobal('location', loc)
+    await api.get('/api/documents').catch(() => {})
+    expect(getImpersonation()).toBeNull()
+    expect(localStorage.getItem('palimora_token')).toBeNull()
+    expect(loc.href).toBe('/login')
   })
 })

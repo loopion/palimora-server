@@ -58,7 +58,8 @@ export default function Admin() {
     try {
       await api.post(`/api/admin/impersonate/${u.id}`)
       setImpersonation({ id: u.id, email: u.email })
-      navigate('/')
+      // Hard reload so <ImpersonationBanner /> (mounted outside the router) re-evaluates.
+      window.location.assign('/')
     } catch {
       setToast("Erreur lors de l'impersonation")
       setTimeout(() => setToast(''), 2500)

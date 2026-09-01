@@ -60,7 +60,9 @@ def bearer_token(request: Request) -> str | None:
 def resolve_impersonation_target(db: Session, target_id: str) -> User:
     target = db.query(User).filter_by(id=target_id).one_or_none()
     if not target or not target.is_active:
-        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+        raise HTTPException(
+            status_code=404, detail="Utilisateur à impersoner introuvable"
+        )
     if target.is_admin:
         raise HTTPException(
             status_code=403, detail="Impersonation d'un administrateur interdite"
