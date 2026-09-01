@@ -12,8 +12,11 @@ class GatewayError(Exception):
     pass
 
 
-def _tax() -> dict:
-    return {"enabled": settings.stripe_tax_enabled}
+def _tax_kwargs() -> dict:
+    """automatic_tax is only valid on Subscription/Checkout/Invoice — never on a
+    bare PaymentIntent (Stripe rejects it as parameter_unknown). Only attach it
+    when tax collection is actually enabled."""
+    return {"automatic_tax": {"enabled": True}} if settings.stripe_tax_enabled else {}
 
 
 def ensure_customer(user) -> str:
@@ -46,7 +49,6 @@ def create_payment_intent(*, customer_id: str, price_id: str, metadata: dict) ->
             amount=amount,
             currency=currency,
             customer=customer_id,
-            automatic_tax=_tax(),
             metadata=metadata,
         )
     except stripe.error.StripeError as e:
@@ -61,9 +63,9 @@ def create_subscription(*, customer_id: str, price_id: str, metadata: dict) -> t
             items=[{"price": price_id}],
             payment_behavior="default_incomplete",
             payment_settings={"save_default_payment_method": "on_subscription"},
-            automatic_tax=_tax(),
             expand=["latest_invoice.payment_intent"],
             metadata=metadata,
+            **_tax_kwargs(),
         )
     except stripe.error.StripeError as e:
         raise GatewayError(str(e)) from e
