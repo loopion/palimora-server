@@ -15,6 +15,11 @@ describe('impersonation storage', () => {
     setImpersonation(null)
     expect(getImpersonation()).toBeNull()
   })
+
+  it('returns null on malformed JSON', () => {
+    localStorage.setItem('palimora_impersonate', 'not-valid-json')
+    expect(getImpersonation()).toBeNull()
+  })
 })
 
 describe('X-Impersonate header', () => {
@@ -40,6 +45,18 @@ describe('bad impersonation target', () => {
     const reload = vi.fn()
     vi.stubGlobal('location', { reload } as any)
 
+    await api.get('/api/documents').catch(() => {})
+    expect(getImpersonation()).toBeNull()
+    expect(localStorage.getItem('palimora_token')).toBe('tok')
+    expect(reload).toHaveBeenCalled()
+  })
+
+  it('clears impersonation when detail contains "impersonation", keeps token', async () => {
+    setImpersonation({ id: 'bad', email: 'x@test.fr' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'Impersonation réservée aux administrateurs' }), { status: 403 })))
+    const reload = vi.fn()
+    vi.stubGlobal('location', { reload } as any)
     await api.get('/api/documents').catch(() => {})
     expect(getImpersonation()).toBeNull()
     expect(localStorage.getItem('palimora_token')).toBe('tok')
