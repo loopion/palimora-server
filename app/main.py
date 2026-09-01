@@ -18,12 +18,13 @@ from .audit import record as _audit_record
 from .auth import (
     create_auth_token, get_admin_user, get_current_user, hash_password,
     issue_device_token, new_id, send_email, verify_password, consume_auth_token,
+    resolve_impersonation_target,
 )
 from .config import settings
 from .credits import InsufficientCredits
 from .db import Base, SessionLocal, engine, get_db
 from .models import (
-    AISuggestion, CreditTransaction, Device, Document, GlossaryEntry, Page,
+    AdminAuditLog, AISuggestion, CreditTransaction, Device, Document, GlossaryEntry, Page,
     PageJob, Segment, StripeEvent, Subscription, Transcription, User,
 )
 from .ocr_service import enqueue_page_ocr
@@ -999,6 +1000,45 @@ def admin_stats(db: Session = Depends(get_db), admin: User = Depends(get_admin_u
         "pages_total": db.query(Page).count(),
         "credits_in_circulation": db.query(func.sum(User.credit_balance)).scalar() or 0,
     }
+
+
+@app.post("/api/admin/impersonate/{user_id}")
+def admin_start_impersonation(user_id: str, db: Session = Depends(get_db),
+                              admin: User = Depends(get_admin_user)):
+    target = resolve_impersonation_target(db, user_id)
+    db.add(AdminAuditLog(actor_user_id=admin.id, target_user_id=target.id,
+                         event="impersonation.start"))
+    db.commit()
+    return {"id": target.id, "email": target.email, "display_name": target.display_name}
+
+
+@app.delete("/api/admin/impersonate", status_code=204)
+def admin_stop_impersonation(user_id: str | None = None, db: Session = Depends(get_db),
+                             admin: User = Depends(get_admin_user)):
+    db.add(AdminAuditLog(actor_user_id=admin.id, target_user_id=user_id,
+                         event="impersonation.stop"))
+    db.commit()
+
+
+@app.get("/api/admin/audit")
+def admin_audit(limit: int = 100, target: str | None = None,
+                db: Session = Depends(get_db), admin: User = Depends(get_admin_user)):
+    limit = max(1, min(limit, 500))
+    q = db.query(AdminAuditLog).order_by(AdminAuditLog.created_at.desc())
+    if target:
+        q = q.filter(AdminAuditLog.target_user_id == target)
+    rows = q.limit(limit).all()
+    ids = {r.actor_user_id for r in rows} | {r.target_user_id for r in rows if r.target_user_id}
+    emails = {u.id: u.email for u in db.query(User).filter(User.id.in_(ids)).all()} if ids else {}
+    return {"rows": [
+        {"id": r.id,
+         "created_at": r.created_at.isoformat() if r.created_at else None,
+         "event": r.event, "method": r.method, "path": r.path,
+         "status_code": r.status_code,
+         "actor_email": emails.get(r.actor_user_id),
+         "target_email": emails.get(r.target_user_id)}
+        for r in rows
+    ]}
 
 
 @app.get("/api/admin/billing/events")
