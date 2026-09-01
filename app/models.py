@@ -71,7 +71,7 @@ class CreditTransaction(Base):
     balance_after: Mapped[int] = mapped_column(Integer)
     reason: Mapped[str] = mapped_column(String(40))
     ref_type: Mapped[str] = mapped_column(String(20), default="")
-    ref_id: Mapped[str] = mapped_column(String(36), default="")
+    ref_id: Mapped[str] = mapped_column(String(128), default="")
     note: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 

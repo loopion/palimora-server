@@ -53,6 +53,7 @@ def _migrate() -> None:
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS tags JSON DEFAULT '[]'",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(64)",
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_stripe_customer_id ON users (stripe_customer_id)",
+        "ALTER TABLE credit_transactions ALTER COLUMN ref_id TYPE VARCHAR(128)",
     ]
     for stmt in stmts:
         # Each statement in its own transaction: on Postgres a single failing
