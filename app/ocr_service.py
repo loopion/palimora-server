@@ -26,7 +26,7 @@ def _page_file_bytes(page) -> bytes:
                 os.remove(local)
             except OSError:
                 pass
-    resp = _httpx.get(
+    resp = httpx.get(
         f"{settings.internal_api_url}/api/internal/pages/{page.id}/file",
         headers={"X-Internal-Key": settings.secret_key},
         timeout=300,
