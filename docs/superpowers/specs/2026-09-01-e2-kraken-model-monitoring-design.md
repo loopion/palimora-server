@@ -1,7 +1,7 @@
 # E2 — Kraken Model Override + OCR Timing Monitoring — Design
 
 Date: 2026-09-01
-Status: approved (design), pending spec review
+Status: implemented (E2)
 Phase: E (admin + monitoring). Sub-project 2 of 2 (E1 impersonation shipped
 2026-09-01 merge `0d9cb28`; this is E2).
 
