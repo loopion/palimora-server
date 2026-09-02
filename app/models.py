@@ -170,6 +170,12 @@ class Page(Base):
     validation_status: Mapped[str] = mapped_column(String(20), default="unreviewed")
     error: Mapped[str] = mapped_column(Text, default="")
     kraken_job_id: Mapped[str] = mapped_column(String(64), default="")
+    ocr_submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    ocr_finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    ocr_model_key: Mapped[str] = mapped_column(String(40), default="")
+    ocr_batch_size: Mapped[int] = mapped_column(Integer, default=1)
     credits_charged: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

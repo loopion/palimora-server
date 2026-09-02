@@ -122,6 +122,10 @@ def _migrate() -> None:
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(64)",
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_stripe_customer_id ON users (stripe_customer_id)",
         "ALTER TABLE credit_transactions ALTER COLUMN ref_id TYPE VARCHAR(128)",
+        "ALTER TABLE pages ADD COLUMN IF NOT EXISTS ocr_submitted_at TIMESTAMPTZ",
+        "ALTER TABLE pages ADD COLUMN IF NOT EXISTS ocr_finished_at TIMESTAMPTZ",
+        "ALTER TABLE pages ADD COLUMN IF NOT EXISTS ocr_model_key VARCHAR(40) DEFAULT ''",
+        "ALTER TABLE pages ADD COLUMN IF NOT EXISTS ocr_batch_size INTEGER DEFAULT 1",
     ]
     for stmt in stmts:
         # Each statement in its own transaction: on Postgres a single failing
