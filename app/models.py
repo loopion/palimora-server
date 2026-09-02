@@ -119,6 +119,17 @@ class AdminAuditLog(Base):
         DateTime(timezone=True), default=now, index=True)
 
 
+class AppSetting(Base):
+    """Generic runtime key/value settings (currently only key='ocr_model')."""
+    __tablename__ = "app_setting"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(255), default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, onupdate=now)
+    updated_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True)
+
+
 class SchemaMigration(Base):
     __tablename__ = "schema_migrations"
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
