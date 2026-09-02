@@ -56,7 +56,8 @@ def test_enqueue_puts_model_in_payload(db, monkeypatch):
 def test_image_ocr_stamps_timing(client, db, monkeypatch):
     _, pages = _make_page(db)
     page_id = pages[0].id
-    monkeypatch.setattr(kraken, "submit_ocr", lambda *a, **k: "job-x")
+    captured = {}
+    monkeypatch.setattr(kraken, "submit_ocr", lambda *a, **k: captured.update(k) or "job-x")
     monkeypatch.setattr(kraken, "wait_for_result", lambda *a, **k: {"pages": [{"lines": []}]})
     monkeypatch.setattr(ocr_service, "_page_file_bytes", lambda page: b"x")
     ocr_service.run_ocr_job({
@@ -68,6 +69,8 @@ def test_image_ocr_stamps_timing(client, db, monkeypatch):
     assert p.ocr_submitted_at is not None and p.ocr_finished_at is not None
     assert p.ocr_model_key == "rapide"
     assert p.ocr_batch_size == 1
+    assert captured["seg_model_path"] == "/m/seg.mlmodel"
+    assert captured["rec_model_path"] == "/m/rec-fast.mlmodel"
 
 
 def test_pdf_ocr_stamps_all_siblings_with_batch_size(client, db, monkeypatch):
