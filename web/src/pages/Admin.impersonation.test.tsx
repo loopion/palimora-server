@@ -26,6 +26,7 @@ beforeEach(() => {
     if (url.includes('/api/admin/audit')) return new Response(JSON.stringify({ rows: [
       { id: 'a1', created_at: '2026-09-01T10:00:00Z', event: 'impersonation.start', method: null, path: null, status_code: null, actor_email: 'admin@test.fr', target_email: 'user@test.fr' },
     ] }), { status: 200 })
+    if (url.endsWith('/api/admin/ocr')) return new Response(JSON.stringify({ models: [], active_key: '', active_source: 'fallback', recent: [], aggregates: [] }), { status: 200 })
     if (url.match(/\/api\/admin\/impersonate\/u1$/)) return new Response(JSON.stringify({ id: 'u1', email: 'user@test.fr', display_name: 'U' }), { status: 200 })
     return new Response('{}', { status: 200 })
   }))
@@ -58,6 +59,7 @@ it('failed impersonate shows toast and does not navigate', async () => {
     if (url.endsWith('/api/admin/stats')) return new Response(JSON.stringify({
       users: 1, documents: 0, pages_done: 0, pages_error: 0, pages_total: 0, credits_in_circulation: 5 }), { status: 200 })
     if (url.includes('/api/admin/audit')) return new Response(JSON.stringify({ rows: [] }), { status: 200 })
+    if (url.endsWith('/api/admin/ocr')) return new Response(JSON.stringify({ models: [], active_key: '', active_source: 'fallback', recent: [], aggregates: [] }), { status: 200 })
     if (url.match(/\/api\/admin\/impersonate\/u1$/)) return new Response(JSON.stringify({ detail: 'nope' }), { status: 500 })
     return new Response('{}', { status: 200 })
   }))

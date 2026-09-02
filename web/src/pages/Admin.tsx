@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, setImpersonation, setToken } from '../api'
+import type { OcrPanelData } from '../api'
 
 interface AdminUser {
   id: string; email: string; display_name: string
@@ -22,18 +23,23 @@ export default function Admin() {
   const [grant, setGrant] = useState<Record<string, string>>({})
   const [toast, setToast] = useState('')
   const [audit, setAudit] = useState<AuditRow[]>([])
+  const [ocr, setOcr] = useState<OcrPanelData | null>(null)
+  const [modelKey, setModelKey] = useState('')
   const [impersonating, setImpersonating] = useState(false)
   const navigate = useNavigate()
 
   const refresh = useCallback(async () => {
-    const [u, s, a] = await Promise.all([
+    const [u, s, a, o] = await Promise.all([
       api.get<{ users: AdminUser[] }>('/api/admin/users'),
       api.get<Stats>('/api/admin/stats'),
       api.get<{ rows: AuditRow[] }>('/api/admin/audit?limit=100'),
+      api.get<OcrPanelData>('/api/admin/ocr'),
     ])
     setUsers(u.users)
     setStats(s)
     setAudit(a.rows)
+    setOcr(o)
+    setModelKey(o.active_key)
   }, [])
 
   useEffect(() => {
@@ -64,6 +70,18 @@ export default function Admin() {
       setToast("Erreur lors de l'impersonation")
       setTimeout(() => setToast(''), 2500)
       setImpersonating(false)
+    }
+  }
+
+  async function saveModel() {
+    try {
+      await api.put('/api/admin/ocr/model', { key: modelKey })
+      setToast('Modèle OCR mis à jour')
+      setTimeout(() => setToast(''), 2500)
+      refresh()
+    } catch {
+      setToast('Erreur mise à jour modèle')
+      setTimeout(() => setToast(''), 2500)
     }
   }
 
@@ -170,6 +188,72 @@ export default function Admin() {
           </tbody>
         </table>
       </div>
+
+      {ocr && (
+        <div className="px-4 pb-12">
+          <h2 className="mb-2 font-semibold">OCR / Modèles</h2>
+
+          {ocr.models.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              Aucun modèle alternatif configuré (env <code>KRAKEN_MODELS</code>).
+            </p>
+          ) : (
+            <div className="mb-4 flex items-center gap-2 text-sm">
+              <select className="border rounded px-2 py-1"
+                      value={modelKey} onChange={(e) => setModelKey(e.target.value)}>
+                {ocr.models.map((m) => <option key={m.key} value={m.key}>{m.key}</option>)}
+              </select>
+              <button className="bg-indigo-600 text-white rounded px-3 py-1" onClick={saveModel}>
+                Enregistrer
+              </button>
+              <span className="text-xs text-slate-500">source&nbsp;: {ocr.active_source}</span>
+            </div>
+          )}
+
+          <table className="w-full bg-white rounded-lg border text-sm mb-6">
+            <thead><tr className="text-left text-slate-500 border-b">
+              <th className="p-2">Modèle</th><th className="p-2">Pages</th>
+              <th className="p-2">Médiane (s)</th><th className="p-2">p95 (s)</th>
+              <th className="p-2">Confiance moy.</th>
+            </tr></thead>
+            <tbody>
+              {ocr.aggregates.map((a) => (
+                <tr key={a.model_key || '—'} className="border-b">
+                  <td className="p-2">{a.model_key || '—'}</td>
+                  <td className="p-2">{a.pages}</td>
+                  <td className="p-2">{a.median_s ?? '—'}</td>
+                  <td className="p-2">{a.p95_s ?? '—'}</td>
+                  <td className="p-2">{a.avg_confidence ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <table className="w-full bg-white rounded-lg border text-sm">
+            <thead><tr className="text-left text-slate-500 border-b">
+              <th className="p-2">Date</th><th className="p-2">Document</th>
+              <th className="p-2">Statut</th><th className="p-2">Durée (s)</th>
+              <th className="p-2">Durée/page (s)</th><th className="p-2">Modèle</th>
+              <th className="p-2">Confiance</th>
+            </tr></thead>
+            <tbody>
+              {ocr.recent.map((r) => (
+                <tr key={r.page_id} className="border-b">
+                  <td className="p-2">{r.submitted_at ? new Date(r.submitted_at).toLocaleString('fr-FR') : '—'}</td>
+                  <td className="p-2">
+                    <Link to={`/`} className="text-indigo-600">{r.document_title}</Link>
+                  </td>
+                  <td className="p-2">{r.processing_status}</td>
+                  <td className="p-2">{r.duration_s ?? '—'}</td>
+                  <td className="p-2">{r.per_page_s ?? '—'}</td>
+                  <td className="p-2">{r.model_key || '—'}</td>
+                  <td className="p-2">{r.avg_confidence ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {toast && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm rounded-lg px-4 py-2">
