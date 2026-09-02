@@ -13,7 +13,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import ai, billing, credits, kraken, storage
+from . import ai, billing, credits, kraken, ocr_models, storage
 from .audit import record as _audit_record
 from .auth import (
     create_auth_token, get_admin_user, get_current_user, hash_password,
@@ -1057,6 +1057,86 @@ def admin_audit(limit: int = 100, target: str | None = None,
          "target_email": emails.get(r.target_user_id)}
         for r in rows
     ]}
+
+
+def _percentiles(durations: list[float]):
+    """Return (median, p95) via nearest-rank on the in-window rows."""
+    if not durations:
+        return None, None
+    s = sorted(durations)
+
+    def rank(p):
+        i = max(0, min(len(s) - 1, int(round(p * (len(s) - 1)))))
+        return s[i]
+
+    return rank(0.5), rank(0.95)
+
+
+@app.get("/api/admin/ocr")
+def admin_ocr(db: Session = Depends(get_db), admin: User = Depends(get_admin_user)):
+    from datetime import timedelta
+
+    active = ocr_models.resolve_active(db)
+    recent_rows = (
+        db.query(Page, Document.title)
+        .join(Document, Document.id == Page.document_id)
+        .filter(Page.ocr_submitted_at.isnot(None))
+        .order_by(Page.ocr_submitted_at.desc())
+        .limit(50).all()
+    )
+
+    def _dur(p):
+        if p.ocr_submitted_at and p.ocr_finished_at:
+            return round((p.ocr_finished_at - p.ocr_submitted_at).total_seconds(), 1)
+        return None
+
+    def _avg_conf(page_id):
+        v = (db.query(func.avg(Transcription.confidence_score))
+             .filter(Transcription.page_id == page_id).scalar())
+        return round(float(v), 3) if v is not None else None
+
+    recent = []
+    for p, title in recent_rows:
+        d = _dur(p)
+        recent.append({
+            "page_id": p.id, "document_id": p.document_id, "document_title": title,
+            "processing_status": p.processing_status,
+            "duration_s": d,
+            "per_page_s": round(d / max(p.ocr_batch_size, 1), 1) if d is not None else None,
+            "model_key": p.ocr_model_key or "",
+            "avg_confidence": _avg_conf(p.id),
+            "submitted_at": p.ocr_submitted_at.isoformat() if p.ocr_submitted_at else None,
+        })
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    agg_pages = (
+        db.query(Page)
+        .filter(Page.ocr_submitted_at.isnot(None), Page.ocr_finished_at.isnot(None),
+                Page.ocr_submitted_at >= cutoff)
+        .all()
+    )
+    by_key: dict[str, list[Page]] = {}
+    for p in agg_pages:
+        by_key.setdefault(p.ocr_model_key or "", []).append(p)
+    aggregates = []
+    for key, ps in sorted(by_key.items()):
+        durs = [(p.ocr_finished_at - p.ocr_submitted_at).total_seconds() for p in ps]
+        med, p95 = _percentiles(durs)
+        confs = [c for c in (_avg_conf(p.id) for p in ps) if c is not None]
+        aggregates.append({
+            "model_key": key, "pages": len(ps),
+            "median_s": round(med, 1) if med is not None else None,
+            "p95_s": round(p95, 1) if p95 is not None else None,
+            "avg_confidence": round(sum(confs) / len(confs), 3) if confs else None,
+        })
+
+    return {
+        "models": ocr_models.list_models(),
+        "active_key": active["key"],
+        "active_source": ocr_models.active_source(db),
+        "recent": recent,
+        "aggregates": aggregates,
+    }
 
 
 @app.get("/api/admin/billing/events")
