@@ -58,6 +58,33 @@ it('saving a new model calls PUT', async () => {
   })
 })
 
+it('disables the button while the PUT is in flight (single PUT on double-click)', async () => {
+  let release: () => void = () => {}
+  ;(fetch as any).mockImplementation(async (url: string) => {
+    if (url.endsWith('/api/admin/ocr/model')) {
+      await new Promise<void>((res) => { release = res })
+      return new Response(JSON.stringify({ active_key: 'rapide' }), { status: 200 })
+    }
+    if (url.endsWith('/api/auth/me')) return new Response(JSON.stringify({ is_admin: true }), { status: 200 })
+    if (url.endsWith('/api/admin/users')) return new Response(JSON.stringify({ users: [] }), { status: 200 })
+    if (url.endsWith('/api/admin/stats')) return new Response(JSON.stringify({ users: 0, documents: 0, pages_done: 0, pages_error: 0, pages_total: 0, credits_in_circulation: 0 }), { status: 200 })
+    if (url.includes('/api/admin/audit')) return new Response(JSON.stringify({ rows: [] }), { status: 200 })
+    if (url.endsWith('/api/admin/ocr')) return new Response(JSON.stringify(ocrData), { status: 200 })
+    return new Response('{}', { status: 200 })
+  })
+  render(<MemoryRouter><Admin /></MemoryRouter>)
+  await screen.findByRole('combobox')
+  await userEvent.selectOptions(screen.getByRole('combobox'), 'rapide')
+  const btn = screen.getByRole('button', { name: /enregistrer/i })
+  await userEvent.click(btn)
+  expect(btn).toBeDisabled()
+  await userEvent.click(btn)
+  release()
+  await waitFor(() => expect(btn).not.toBeDisabled())
+  const putCalls = (fetch as any).mock.calls.filter((c: any[]) => c[0].endsWith('/api/admin/ocr/model'))
+  expect(putCalls.length).toBe(1)
+})
+
 it('shows a message and no selector when no models configured', async () => {
   ;(fetch as any).mockImplementation(async (url: string) => {
     if (url.endsWith('/api/admin/ocr')) return new Response(JSON.stringify({ ...ocrData, models: [] }), { status: 200 })

@@ -27,6 +27,9 @@ def test_invalid_key_400(client, db):
     r = client.put("/api/admin/ocr/model", json={"key": "bogus"}, headers=auth_headers(db, admin))
     assert r.status_code == 400
     assert "bogus" in r.json()["detail"]
+    db.expire_all()
+    from app.models import AdminAuditLog
+    assert db.query(AdminAuditLog).filter_by(event="ocr.model_change").count() == 0
 
 
 def test_requires_admin(client, db):

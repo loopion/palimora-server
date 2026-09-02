@@ -25,6 +25,7 @@ export default function Admin() {
   const [audit, setAudit] = useState<AuditRow[]>([])
   const [ocr, setOcr] = useState<OcrPanelData | null>(null)
   const [modelKey, setModelKey] = useState('')
+  const [savingModel, setSavingModel] = useState(false)
   const [impersonating, setImpersonating] = useState(false)
   const navigate = useNavigate()
 
@@ -73,15 +74,23 @@ export default function Admin() {
     }
   }
 
+  const effectiveKey =
+    ocr && ocr.models.some((m) => m.key === modelKey)
+      ? modelKey
+      : ocr?.models[0]?.key ?? ''
+
   async function saveModel() {
+    setSavingModel(true)
     try {
-      await api.put('/api/admin/ocr/model', { key: modelKey })
+      await api.put('/api/admin/ocr/model', { key: effectiveKey })
       setToast('Modèle OCR mis à jour')
       setTimeout(() => setToast(''), 2500)
       refresh()
     } catch {
       setToast('Erreur mise à jour modèle')
       setTimeout(() => setToast(''), 2500)
+    } finally {
+      setSavingModel(false)
     }
   }
 
@@ -200,10 +209,11 @@ export default function Admin() {
           ) : (
             <div className="mb-4 flex items-center gap-2 text-sm">
               <select className="border rounded px-2 py-1"
-                      value={modelKey} onChange={(e) => setModelKey(e.target.value)}>
+                      value={effectiveKey} onChange={(e) => setModelKey(e.target.value)}>
                 {ocr.models.map((m) => <option key={m.key} value={m.key}>{m.key}</option>)}
               </select>
-              <button className="bg-indigo-600 text-white rounded px-3 py-1" onClick={saveModel}>
+              <button className="bg-indigo-600 text-white rounded px-3 py-1 disabled:opacity-50"
+                      disabled={savingModel} onClick={saveModel}>
                 Enregistrer
               </button>
               <span className="text-xs text-slate-500">source&nbsp;: {ocr.active_source}</span>
