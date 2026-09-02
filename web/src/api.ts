@@ -195,7 +195,7 @@ export interface OcrRecentRow {
   model_key: string; avg_confidence: number | null; submitted_at: string | null
 }
 export interface OcrAggregate {
-  model_key: string; pages: number
+  model_key: string; pages: number; errors: number
   median_s: number | null; p95_s: number | null; avg_confidence: number | null
 }
 export interface OcrPanelData {

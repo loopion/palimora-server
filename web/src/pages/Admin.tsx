@@ -76,10 +76,10 @@ export default function Admin() {
     }
   }
 
+  // '' when the active model isn't one of the configurable keys (fallback):
+  // don't pretend the first listed model is selected.
   const effectiveKey =
-    ocr && ocr.models.some((m) => m.key === modelKey)
-      ? modelKey
-      : ocr?.models[0]?.key ?? ''
+    ocr && ocr.models.some((m) => m.key === modelKey) ? modelKey : ''
 
   async function saveModel() {
     setSavingModel(true)
@@ -212,10 +212,11 @@ export default function Admin() {
             <div className="mb-4 flex items-center gap-2 text-sm">
               <select className="border rounded px-2 py-1"
                       value={effectiveKey} onChange={(e) => setModelKey(e.target.value)}>
+                {effectiveKey === '' && <option value="" disabled>— défaut Kraken —</option>}
                 {ocr.models.map((m) => <option key={m.key} value={m.key}>{m.key}</option>)}
               </select>
               <button className="bg-indigo-600 text-white rounded px-3 py-1 disabled:opacity-50"
-                      disabled={savingModel} onClick={saveModel}>
+                      disabled={savingModel || effectiveKey === ''} onClick={saveModel}>
                 Enregistrer
               </button>
               <span className="text-xs text-slate-500">source&nbsp;: {ocr.active_source}</span>
@@ -225,6 +226,7 @@ export default function Admin() {
           <table className="w-full bg-white rounded-lg border text-sm mb-6">
             <thead><tr className="text-left text-slate-500 border-b">
               <th className="p-2">Modèle</th><th className="p-2">Pages</th>
+              <th className="p-2">Erreurs</th>
               <th className="p-2">Médiane (s)</th><th className="p-2">p95 (s)</th>
               <th className="p-2">Confiance moy.</th>
             </tr></thead>
@@ -233,6 +235,7 @@ export default function Admin() {
                 <tr key={a.model_key || '—'} className="border-b">
                   <td className="p-2">{a.model_key || '—'}</td>
                   <td className="p-2">{a.pages}</td>
+                  <td className="p-2">{a.errors}</td>
                   <td className="p-2">{a.median_s ?? '—'}</td>
                   <td className="p-2">{a.p95_s ?? '—'}</td>
                   <td className="p-2">{a.avg_confidence ?? '—'}</td>
@@ -252,9 +255,7 @@ export default function Admin() {
               {ocr.recent.map((r) => (
                 <tr key={r.page_id} className="border-b">
                   <td className="p-2">{r.submitted_at ? new Date(r.submitted_at).toLocaleString('fr-FR') : '—'}</td>
-                  <td className="p-2">
-                    <Link to={`/`} className="text-indigo-600">{r.document_title}</Link>
-                  </td>
+                  <td className="p-2">{r.document_title}</td>
                   <td className="p-2">{r.processing_status}</td>
                   <td className="p-2">{r.duration_s ?? '—'}</td>
                   <td className="p-2">{r.per_page_s ?? '—'}</td>

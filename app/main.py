@@ -126,6 +126,7 @@ def _migrate() -> None:
         "ALTER TABLE pages ADD COLUMN IF NOT EXISTS ocr_finished_at TIMESTAMPTZ",
         "ALTER TABLE pages ADD COLUMN IF NOT EXISTS ocr_model_key VARCHAR(40) DEFAULT ''",
         "ALTER TABLE pages ADD COLUMN IF NOT EXISTS ocr_batch_size INTEGER DEFAULT 1",
+        "CREATE INDEX IF NOT EXISTS ix_pages_ocr_submitted_at ON pages (ocr_submitted_at)",
     ]
     for stmt in stmts:
         # Each statement in its own transaction: on Postgres a single failing
@@ -1123,7 +1124,10 @@ def admin_ocr(db: Session = Depends(get_db), admin: User = Depends(get_admin_use
         Page.ocr_submitted_at.isnot(None), Page.ocr_finished_at.isnot(None),
         Page.ocr_submitted_at >= cutoff,
     )
+    done = (*window, Page.processing_status == "done")
 
+    # Timing + confidence over successful pages only, so a model that errors
+    # fast (bad rec_path) can't masquerade as the quickest one.
     agg_rows = (
         db.query(
             Page.ocr_model_key,
@@ -1131,23 +1135,33 @@ def admin_ocr(db: Session = Depends(get_db), admin: User = Depends(get_admin_use
             func.avg(Transcription.confidence_score),
         )
         .outerjoin(Transcription, Transcription.page_id == Page.id)
-        .filter(*window)
+        .filter(*done)
         .group_by(Page.ocr_model_key)
         .all()
     )
+    err_rows = (
+        db.query(Page.ocr_model_key, func.count(Page.id))
+        .filter(*window, Page.processing_status == "error")
+        .group_by(Page.ocr_model_key)
+        .all()
+    )
+    errors_by_key = {(k or ""): n for k, n in err_rows}
     timing_rows = (
         db.query(Page.ocr_model_key, Page.ocr_submitted_at, Page.ocr_finished_at)
-        .filter(*window).all()
+        .filter(*done).all()
     )
     durs_by_key: dict[str, list[float]] = {}
     for key, sub, fin in timing_rows:
         durs_by_key.setdefault(key or "", []).append((fin - sub).total_seconds())
 
+    agg_by_key = {(k or ""): (pages, avg_conf) for k, pages, avg_conf in agg_rows}
     aggregates = []
-    for key, pages, avg_conf in sorted(agg_rows, key=lambda r: r[0] or ""):
-        med, p95 = _percentiles(durs_by_key.get(key or "", []))
+    for key in sorted(set(agg_by_key) | set(errors_by_key)):
+        pages, avg_conf = agg_by_key.get(key, (0, None))
+        med, p95 = _percentiles(durs_by_key.get(key, []))
         aggregates.append({
-            "model_key": key or "", "pages": pages,
+            "model_key": key, "pages": pages,
+            "errors": errors_by_key.get(key, 0),
             "median_s": round(med, 1) if med is not None else None,
             "p95_s": round(p95, 1) if p95 is not None else None,
             "avg_confidence": round(float(avg_conf), 3) if avg_conf is not None else None,

@@ -67,6 +67,20 @@ def test_aggregates_window_30_days(client, db):
     assert agg["défaut"]["pages"] == 1  # the 40-day-old one excluded
 
 
+def test_fast_error_page_excluded_from_timing_counted_in_errors(client, db):
+    admin = make_user(db, email="a@test.fr", is_admin=True)
+    doc = Document(user_id=admin.id, title="D"); db.add(doc); db.commit()
+    _page(db, doc, key="rapide", dur_s=88, conf=0.7)  # healthy, done
+    broken = _page(db, doc, key="rapide", dur_s=0.2, conf=0.0)  # errored fast
+    broken.processing_status = "error"
+    db.commit()
+    r = client.get("/api/admin/ocr", headers=auth_headers(db, admin))
+    agg = {a["model_key"]: a for a in r.json()["aggregates"]}
+    assert agg["rapide"]["pages"] == 1  # only the done page
+    assert agg["rapide"]["errors"] == 1
+    assert agg["rapide"]["median_s"] == 88.0  # not dragged to 0.2
+
+
 def test_requires_admin(client, db):
     u = make_user(db, email="u@test.fr")
     assert client.get("/api/admin/ocr", headers=auth_headers(db, u)).status_code == 403

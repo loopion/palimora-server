@@ -99,10 +99,14 @@ def run_ocr_job(payload: dict) -> dict:
 
     page_id = payload["page_id"]
     db = sessionmaker(bind=_db.engine, autoflush=False, expire_on_commit=False)()
+    page = None
     try:
-        page = db.query(Page).filter_by(id=page_id).one()
-        document = db.query(Document).filter_by(id=page.document_id).one()
         try:
+            # Inside the failure-handling try: a schema mismatch during a deploy
+            # window makes these queries throw too, and the page must still be
+            # flagged + its credits refunded.
+            page = db.query(Page).filter_by(id=page_id).one()
+            document = db.query(Document).filter_by(id=page.document_id).one()
             if page.content_type.startswith("application/pdf"):
                 _run_pdf(db, page, document, payload)
             else:
@@ -112,6 +116,8 @@ def run_ocr_job(payload: dict) -> dict:
         except Exception as exc:  # noqa: BLE001 — refund + flag, never crash silently
             db.rollback()
             message = str(exc)
+            if page is None:
+                page = db.query(Page).filter_by(id=page_id).one()
             targets = [page]
             if page.content_type.startswith("application/pdf"):
                 targets = (
