@@ -27,16 +27,48 @@
 
 ---
 
-### Task 1: Test scaffold
+### Task 1: Lazy kraken imports + test scaffold
+
+**Why the lazy-import step:** `app.py` does `from tasks import process_ocr`, and
+`tasks.py` does `from kraken.configs import ...` / `from kraken import blla` / etc.
+at module top. `import kraken` needs `torch` (~GB). The API container never runs
+OCR (only the worker does), and the test suite monkeypatches htrmopo + the
+rec-model loader — so nothing here needs a real `kraken`. Moving `tasks.py`'s
+kraken imports inside the functions that use them (`get_rec_model`,
+`get_seg_model`, `process_ocr`) makes `import app` work with just
+`fastapi`/`pydantic` installed, and as a bonus the API container stops loading
+torch at boot. `worker.py` / the OCR path are behaviourally unchanged (imports
+resolve on first job).
 
 **Files (in `kraken-ocr-service`):**
+- Modify: `tasks.py` (move kraken imports into the functions)
 - Create: `requirements-dev.txt`, `tests/__init__.py`, `tests/conftest.py`, `pytest.ini`
-- Test: `tests/test_health_smoke.py`
+- Test: `tests/test_health_smoke.py`, `tests/test_ocr_import.py`
 
 **Interfaces:**
-- Produces: a `client` fixture (`TestClient(app)` with `API_KEYS` set to `"testkey"` and `MODEL_DIR` pointed at a per-test `tmp_path` via env + `importlib.reload` OR a module-level `MODELS_DIR` monkeypatch — see Step 3); a `models_dir` fixture returning that `Path`; an `auth` fixture returning `{"X-API-Key": "testkey"}`; a `fake_rec_model` helper that writes a small bytes blob as a `.mlmodel`.
+- Produces: `tasks.py` with no module-level `kraken` import; a `client` fixture
+  (`TestClient(app)` with `API_KEYS="testkey"` and `MODEL_DIR` → per-test `tmp_path`
+  via env + `importlib.reload(app)`); `models_dir` fixture (`Path`); `auth` fixture
+  (`{"X-API-Key": "testkey"}`); a `write_fake_model(models_dir, slug, sidecar=None)`
+  helper.
 
-- [ ] **Step 1: Write the smoke test**
+- [ ] **Step 1: Move kraken imports in `tasks.py` into the functions**
+
+Current top-of-file (lines ~7-11):
+```python
+from kraken.configs import RecognitionInferenceConfig
+from kraken.tasks import RecognitionTaskModel
+from kraken.lib import vgsl
+from kraken import blla
+from kraken.containers import Segmentation, BBoxLine
+```
+Delete those five lines. Add the needed import at the top of each user:
+- `get_rec_model`: `from kraken.tasks import RecognitionTaskModel` (first line of the function).
+- `get_seg_model`: `from kraken.lib import vgsl`.
+- `process_ocr`: `from kraken import blla` + `from kraken.containers import Segmentation, BBoxLine` + `from kraken.configs import RecognitionInferenceConfig` at the top of the `try:` body (before first use).
+Keep `from PIL import Image`, `pdf2image`, stdlib imports at module level.
+
+- [ ] **Step 2: Write the tests**
 
 ```python
 # tests/test_health_smoke.py
@@ -44,18 +76,36 @@ def test_health_no_auth(client):
     assert client.get("/health").json() == {"status": "ok"}
 ```
 
-- [ ] **Step 2: Run it, watch it fail (no pytest / no conftest)**
+```python
+# tests/test_ocr_import.py
+def test_app_imports_without_kraken_installed():
+    """import app must not pull in torch/kraken. If this fails, tasks.py still has
+    a module-level kraken import."""
+    import importlib, app
+    importlib.reload(app)
+    assert hasattr(app, "app")
+```
 
-Run: `cd ~/Documents/antigravity/kraken-ocr-service && python -m pytest -q`
-Expected: FAIL — pytest not installed, or `conftest` import error.
+- [ ] **Step 3: Run them, watch fail (no pytest / no conftest / kraken import)**
 
-- [ ] **Step 3: Create the scaffold**
+Run: `cd ~/Documents/antigravity/kraken-ocr-service && python3 -m pytest -q`
+Expected: FAIL — pytest missing, or `import app` → `ModuleNotFoundError: kraken`.
+
+- [ ] **Step 4: Create the scaffold**
 
 `requirements-dev.txt`:
 ```
 pytest==8.3.3
 httpx==0.27.2
+htrmopo
 ```
+
+`htrmopo` is pure-Python (pulls `lxml` / `sickle`, installs in seconds). The test
+conftest patches `app.htrmopo.get_model` / `.get_description` / `.get_listing`,
+which requires `app.py` to `import htrmopo` at module level (Task 4 does). So
+`app.py` keeps a top-level `import htrmopo`; only `kraken` / `torch` are kept out.
+
+Local dev env: `python3 -m venv .venv && .venv/bin/pip install fastapi pydantic 'uvicorn[standard]' python-multipart jinja2 fpdf2 redis rq pillow htrmopo -r requirements-dev.txt` — enough to `import app` and run the whole suite (no `kraken`, no `torch`). Run tests as `.venv/bin/python -m pytest -q`.
 
 `pytest.ini`:
 ```
@@ -104,18 +154,20 @@ def write_fake_model(models_dir, slug: str, sidecar: dict | None = None):
 
 Note: `app.py` reads `API_KEYS` and (after this plan) `MODELS_DIR` at module import, so `importlib.reload` after `monkeypatch.setenv` is required. If a later task makes `app.py` read `MODEL_DIR` lazily inside handlers instead, the reload can be dropped — keep whichever the implementation needs and note it.
 
-- [ ] **Step 4: Install dev deps + run**
+- [ ] **Step 4: Build the venv + run**
 
-Run: `pip install -r requirements-dev.txt && python -m pytest -q`
-Expected: PASS (1 test)
+Run: `python3 -m venv .venv && .venv/bin/pip install -q fastapi pydantic 'uvicorn[standard]' python-multipart jinja2 fpdf2 redis rq pillow htrmopo -r requirements-dev.txt && .venv/bin/python -m pytest -q`
+Expected: PASS (2 tests — `test_health_no_auth`, `test_app_imports_without_kraken_installed`)
+
+Add `.venv/` to `.gitignore` if not already ignored.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 cd ~/Documents/antigravity/kraken-ocr-service
 git checkout -b feat/e3a-model-management
-git add requirements-dev.txt pytest.ini tests/
-git commit -m "test(models): pytest scaffold with TestClient + tmp MODEL_DIR fixture"
+git add requirements-dev.txt pytest.ini tests/ tasks.py .gitignore
+git commit -m "test(models): pytest scaffold + lazy kraken imports so app imports without torch"
 ```
 
 ---
@@ -512,7 +564,7 @@ Expected: FAIL — 404 (route missing).
 
 - [ ] **Step 3: Implement**
 
-`app.py` imports: `import re`, `import shutil`, `import tempfile`, `import threading`, `import htrmopo`, `from htrmopo.util import _doi_to_zenodo_id`, and `from pydantic import BaseModel`.
+`app.py` imports: `import re`, `import shutil`, `import threading`, `import htrmopo`, `from htrmopo.util import _doi_to_zenodo_id`, and `from pydantic import BaseModel`. (No `tempfile` — `htrmopo.get_model` uses its own cache dir.)
 
 ```python
 _DOI_RE = re.compile(r"^10\.5281/zenodo\.\d+$")
@@ -541,13 +593,11 @@ def _sidecar_from_record(rec, doi: str, size_bytes: int) -> dict:
 def _pull_model_job(job_id: str, doi: str) -> None:
     zid = _doi_to_zenodo_id(doi)
     dest = MODELS_DIR / f"rec-{zid}.mlmodel"
-    tmp = None
     try:
         _write_job(job_id, status="started", progress=0)
-        cache_dir = htrmopo.get_model(
+        cache_dir = Path(htrmopo.get_model(
             doi, callback=lambda total, adv: _write_job(
-                job_id, progress=min(99, int(adv * 100 / total)) if total else 0))
-        cache_dir = Path(cache_dir)
+                job_id, progress=min(99, int(adv * 100 / total)) if total else 0)))
         cands = sorted(
             [p for p in cache_dir.iterdir() if p.suffix in (".mlmodel", ".safetensors")],
             key=lambda p: p.suffix != ".mlmodel")
@@ -566,12 +616,8 @@ def _pull_model_job(job_id: str, doi: str) -> None:
         _atomic_write(MODELS_DIR / f"rec-{zid}.json", json.dumps(sidecar))
         _write_job(job_id, status="finished", slug=f"rec-{zid}", progress=100)
     except Exception as exc:  # noqa: BLE001
-        if dest.exists():
-            dest.unlink(missing_ok=True)
+        dest.unlink(missing_ok=True)
         _write_job(job_id, status="failed", error=str(exc)[:500])
-    finally:
-        if tmp and Path(tmp).exists():
-            shutil.rmtree(tmp, ignore_errors=True)
 ```
 
 Route:
