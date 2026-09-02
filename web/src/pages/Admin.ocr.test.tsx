@@ -85,6 +85,21 @@ it('disables the button while the PUT is in flight (single PUT on double-click)'
   expect(putCalls.length).toBe(1)
 })
 
+it('still renders the console when /api/admin/ocr errors', async () => {
+  ;(fetch as any).mockImplementation(async (url: string) => {
+    if (url.endsWith('/api/admin/ocr')) return new Response('boom', { status: 500 })
+    if (url.endsWith('/api/auth/me')) return new Response(JSON.stringify({ is_admin: true }), { status: 200 })
+    if (url.endsWith('/api/admin/users')) return new Response(JSON.stringify({ users: [{ id: 'u1', email: 'x@y.fr', display_name: 'X', credit_balance: 0, is_admin: false, is_active: true, created_at: '' }] }), { status: 200 })
+    if (url.endsWith('/api/admin/stats')) return new Response(JSON.stringify({ users: 3, documents: 0, pages_done: 0, pages_error: 0, pages_total: 0, credits_in_circulation: 0 }), { status: 200 })
+    if (url.includes('/api/admin/audit')) return new Response(JSON.stringify({ rows: [] }), { status: 200 })
+    return new Response('{}', { status: 200 })
+  })
+  render(<MemoryRouter><Admin /></MemoryRouter>)
+  expect(await screen.findByText('x@y.fr')).toBeInTheDocument()
+  expect(screen.getByText(/Journal d'impersonation/i)).toBeInTheDocument()
+  expect(screen.queryByText(/OCR \/ Modèles/i)).toBeNull()
+})
+
 it('shows a message and no selector when no models configured', async () => {
   ;(fetch as any).mockImplementation(async (url: string) => {
     if (url.endsWith('/api/admin/ocr')) return new Response(JSON.stringify({ ...ocrData, models: [] }), { status: 200 })

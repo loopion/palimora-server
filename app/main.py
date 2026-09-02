@@ -1094,10 +1094,16 @@ def admin_ocr(db: Session = Depends(get_db), admin: User = Depends(get_admin_use
             return round((p.ocr_finished_at - p.ocr_submitted_at).total_seconds(), 1)
         return None
 
-    def _avg_conf(page_id):
-        v = (db.query(func.avg(Transcription.confidence_score))
-             .filter(Transcription.page_id == page_id).scalar())
-        return round(float(v), 3) if v is not None else None
+    recent_ids = [p.id for p, _ in recent_rows]
+    conf_by_page: dict[str, float] = {}
+    if recent_ids:
+        for pid, v in (
+            db.query(Transcription.page_id, func.avg(Transcription.confidence_score))
+            .filter(Transcription.page_id.in_(recent_ids))
+            .group_by(Transcription.page_id).all()
+        ):
+            if v is not None:
+                conf_by_page[pid] = round(float(v), 3)
 
     recent = []
     for p, title in recent_rows:
@@ -1108,30 +1114,43 @@ def admin_ocr(db: Session = Depends(get_db), admin: User = Depends(get_admin_use
             "duration_s": d,
             "per_page_s": round(d / max(p.ocr_batch_size, 1), 1) if d is not None else None,
             "model_key": p.ocr_model_key or "",
-            "avg_confidence": _avg_conf(p.id),
+            "avg_confidence": conf_by_page.get(p.id),
             "submitted_at": p.ocr_submitted_at.isoformat() if p.ocr_submitted_at else None,
         })
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-    agg_pages = (
-        db.query(Page)
-        .filter(Page.ocr_submitted_at.isnot(None), Page.ocr_finished_at.isnot(None),
-                Page.ocr_submitted_at >= cutoff)
+    window = (
+        Page.ocr_submitted_at.isnot(None), Page.ocr_finished_at.isnot(None),
+        Page.ocr_submitted_at >= cutoff,
+    )
+
+    agg_rows = (
+        db.query(
+            Page.ocr_model_key,
+            func.count(func.distinct(Page.id)),
+            func.avg(Transcription.confidence_score),
+        )
+        .outerjoin(Transcription, Transcription.page_id == Page.id)
+        .filter(*window)
+        .group_by(Page.ocr_model_key)
         .all()
     )
-    by_key: dict[str, list[Page]] = {}
-    for p in agg_pages:
-        by_key.setdefault(p.ocr_model_key or "", []).append(p)
+    timing_rows = (
+        db.query(Page.ocr_model_key, Page.ocr_submitted_at, Page.ocr_finished_at)
+        .filter(*window).all()
+    )
+    durs_by_key: dict[str, list[float]] = {}
+    for key, sub, fin in timing_rows:
+        durs_by_key.setdefault(key or "", []).append((fin - sub).total_seconds())
+
     aggregates = []
-    for key, ps in sorted(by_key.items()):
-        durs = [(p.ocr_finished_at - p.ocr_submitted_at).total_seconds() for p in ps]
-        med, p95 = _percentiles(durs)
-        confs = [c for c in (_avg_conf(p.id) for p in ps) if c is not None]
+    for key, pages, avg_conf in sorted(agg_rows, key=lambda r: r[0] or ""):
+        med, p95 = _percentiles(durs_by_key.get(key or "", []))
         aggregates.append({
-            "model_key": key, "pages": len(ps),
+            "model_key": key or "", "pages": pages,
             "median_s": round(med, 1) if med is not None else None,
             "p95_s": round(p95, 1) if p95 is not None else None,
-            "avg_confidence": round(sum(confs) / len(confs), 3) if confs else None,
+            "avg_confidence": round(float(avg_conf), 3) if avg_conf is not None else None,
         })
 
     return {

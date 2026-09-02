@@ -30,17 +30,19 @@ export default function Admin() {
   const navigate = useNavigate()
 
   const refresh = useCallback(async () => {
-    const [u, s, a, o] = await Promise.all([
+    const [u, s, a] = await Promise.all([
       api.get<{ users: AdminUser[] }>('/api/admin/users'),
       api.get<Stats>('/api/admin/stats'),
       api.get<{ rows: AuditRow[] }>('/api/admin/audit?limit=100'),
-      api.get<OcrPanelData>('/api/admin/ocr'),
     ])
     setUsers(u.users)
     setStats(s)
     setAudit(a.rows)
-    setOcr(o)
-    setModelKey(o.active_key)
+    // OCR panel is non-critical: fetch it independently so its failure
+    // (500 / timeout) degrades gracefully instead of blanking the console.
+    api.get<OcrPanelData>('/api/admin/ocr')
+      .then((o) => { setOcr(o); setModelKey(o.active_key) })
+      .catch(() => setOcr(null))
   }, [])
 
   useEffect(() => {
