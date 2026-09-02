@@ -9,6 +9,33 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _parse_kraken_models(raw: str) -> list[dict]:
+    """Parse KRAKEN_MODELS: comma-separated `label=SEG|REC`. Malformed entries
+    are skipped with a warning; never raises."""
+    models: list[dict] = []
+    for entry in (raw or "").split(","):
+        entry = entry.strip()
+        if not entry or "=" not in entry:
+            if entry:
+                print(f"KRAKEN_MODELS: skipping malformed entry {entry!r} (no '=')")
+            continue
+        label, _, value = entry.partition("=")
+        label = label.strip()
+        if not label or len(label) > 40:
+            print(f"KRAKEN_MODELS: skipping entry with bad label {label!r}")
+            continue
+        if "|" not in value:
+            print(f"KRAKEN_MODELS: skipping entry {label!r} (value not SEG|REC)")
+            continue
+        seg, _, rec = value.partition("|")
+        seg, rec = seg.strip(), rec.strip()
+        if not seg or not rec:
+            print(f"KRAKEN_MODELS: skipping entry {label!r} (empty seg or rec path)")
+            continue
+        models.append({"key": label, "seg_path": seg, "rec_path": rec})
+    return models
+
+
 class Settings:
     # Core
     app_name: str = "Palimora Server"
@@ -31,6 +58,8 @@ class Settings:
     kraken_api_url: str = os.getenv("KRAKEN_API_URL", "http://localhost:8000")
     kraken_api_key: str = os.getenv("KRAKEN_API_KEY", "")
     kraken_timeout: int = _int("KRAKEN_TIMEOUT", 3600)
+    kraken_models: list = _parse_kraken_models(os.getenv("KRAKEN_MODELS", ""))
+    kraken_models_default: str = os.getenv("KRAKEN_MODELS_DEFAULT", "")
 
     # Object storage: 's3' (Backblaze B2 / MinIO via env) or 'local' (volume-backed, dev/interim)
     storage_backend: str = os.getenv("STORAGE_BACKEND", "local")

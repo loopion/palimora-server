@@ -13,7 +13,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import ai, billing, credits, kraken, storage
+from . import ai, billing, credits, kraken, ocr_models, storage
 from .audit import record as _audit_record
 from .auth import (
     create_auth_token, get_admin_user, get_current_user, hash_password,
@@ -122,6 +122,11 @@ def _migrate() -> None:
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(64)",
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_stripe_customer_id ON users (stripe_customer_id)",
         "ALTER TABLE credit_transactions ALTER COLUMN ref_id TYPE VARCHAR(128)",
+        "ALTER TABLE pages ADD COLUMN IF NOT EXISTS ocr_submitted_at TIMESTAMPTZ",
+        "ALTER TABLE pages ADD COLUMN IF NOT EXISTS ocr_finished_at TIMESTAMPTZ",
+        "ALTER TABLE pages ADD COLUMN IF NOT EXISTS ocr_model_key VARCHAR(40) DEFAULT ''",
+        "ALTER TABLE pages ADD COLUMN IF NOT EXISTS ocr_batch_size INTEGER DEFAULT 1",
+        "CREATE INDEX IF NOT EXISTS ix_pages_ocr_submitted_at ON pages (ocr_submitted_at)",
     ]
     for stmt in stmts:
         # Each statement in its own transaction: on Postgres a single failing
@@ -215,6 +220,10 @@ class GlossaryIn(BaseModel):
     type: str = "free"
     note: str = ""
     is_preferred: bool = False
+
+
+class OcrModelIn(BaseModel):
+    key: str
 
 
 # ---------------------------------------------------------------- helpers
@@ -1053,6 +1062,129 @@ def admin_audit(limit: int = 100, target: str | None = None,
          "target_email": emails.get(r.target_user_id)}
         for r in rows
     ]}
+
+
+def _percentiles(durations: list[float]):
+    """Return (median, p95) via nearest-rank on the in-window rows."""
+    if not durations:
+        return None, None
+    s = sorted(durations)
+
+    def rank(p):
+        i = max(0, min(len(s) - 1, int(round(p * (len(s) - 1)))))
+        return s[i]
+
+    return rank(0.5), rank(0.95)
+
+
+@app.get("/api/admin/ocr")
+def admin_ocr(db: Session = Depends(get_db), admin: User = Depends(get_admin_user)):
+    from datetime import timedelta
+
+    active = ocr_models.resolve_active(db)
+    recent_rows = (
+        db.query(Page, Document.title)
+        .join(Document, Document.id == Page.document_id)
+        .filter(Page.ocr_submitted_at.isnot(None))
+        .order_by(Page.ocr_submitted_at.desc())
+        .limit(50).all()
+    )
+
+    def _dur(p):
+        if p.ocr_submitted_at and p.ocr_finished_at:
+            return round((p.ocr_finished_at - p.ocr_submitted_at).total_seconds(), 1)
+        return None
+
+    recent_ids = [p.id for p, _ in recent_rows]
+    conf_by_page: dict[str, float] = {}
+    if recent_ids:
+        for pid, v in (
+            db.query(Transcription.page_id, func.avg(Transcription.confidence_score))
+            .filter(Transcription.page_id.in_(recent_ids))
+            .group_by(Transcription.page_id).all()
+        ):
+            if v is not None:
+                conf_by_page[pid] = round(float(v), 3)
+
+    recent = []
+    for p, title in recent_rows:
+        d = _dur(p)
+        recent.append({
+            "page_id": p.id, "document_id": p.document_id, "document_title": title,
+            "processing_status": p.processing_status,
+            "duration_s": d,
+            "per_page_s": round(d / max(p.ocr_batch_size, 1), 1) if d is not None else None,
+            "model_key": p.ocr_model_key or "",
+            "avg_confidence": conf_by_page.get(p.id),
+            "submitted_at": p.ocr_submitted_at.isoformat() if p.ocr_submitted_at else None,
+        })
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    window = (
+        Page.ocr_submitted_at.isnot(None), Page.ocr_finished_at.isnot(None),
+        Page.ocr_submitted_at >= cutoff,
+    )
+    done = (*window, Page.processing_status == "done")
+
+    # Timing + confidence over successful pages only, so a model that errors
+    # fast (bad rec_path) can't masquerade as the quickest one.
+    agg_rows = (
+        db.query(
+            Page.ocr_model_key,
+            func.count(func.distinct(Page.id)),
+            func.avg(Transcription.confidence_score),
+        )
+        .outerjoin(Transcription, Transcription.page_id == Page.id)
+        .filter(*done)
+        .group_by(Page.ocr_model_key)
+        .all()
+    )
+    err_rows = (
+        db.query(Page.ocr_model_key, func.count(Page.id))
+        .filter(*window, Page.processing_status == "error")
+        .group_by(Page.ocr_model_key)
+        .all()
+    )
+    errors_by_key = {(k or ""): n for k, n in err_rows}
+    timing_rows = (
+        db.query(Page.ocr_model_key, Page.ocr_submitted_at, Page.ocr_finished_at)
+        .filter(*done).all()
+    )
+    durs_by_key: dict[str, list[float]] = {}
+    for key, sub, fin in timing_rows:
+        durs_by_key.setdefault(key or "", []).append((fin - sub).total_seconds())
+
+    agg_by_key = {(k or ""): (pages, avg_conf) for k, pages, avg_conf in agg_rows}
+    aggregates = []
+    for key in sorted(set(agg_by_key) | set(errors_by_key)):
+        pages, avg_conf = agg_by_key.get(key, (0, None))
+        med, p95 = _percentiles(durs_by_key.get(key, []))
+        aggregates.append({
+            "model_key": key, "pages": pages,
+            "errors": errors_by_key.get(key, 0),
+            "median_s": round(med, 1) if med is not None else None,
+            "p95_s": round(p95, 1) if p95 is not None else None,
+            "avg_confidence": round(float(avg_conf), 3) if avg_conf is not None else None,
+        })
+
+    return {
+        "models": ocr_models.list_models(),
+        "active_key": active["key"],
+        "active_source": ocr_models.active_source(db),
+        "recent": recent,
+        "aggregates": aggregates,
+    }
+
+
+@app.put("/api/admin/ocr/model")
+def admin_set_ocr_model(payload: OcrModelIn, db: Session = Depends(get_db),
+                        admin: User = Depends(get_admin_user)):
+    try:
+        ocr_models.set_active(db, payload.key, admin)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.commit()
+    return {"active_key": payload.key}
 
 
 @app.get("/api/admin/billing/events")

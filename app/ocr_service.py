@@ -4,12 +4,42 @@ Two job shapes:
 - image page: 1 page = 1 Kraken job
 - PDF page:   1 Kraken job for the whole file, result split across the page rows
 """
+from datetime import datetime, timezone
+
 import httpx
 from pdf2image import convert_from_path
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
-from . import credits, kraken, storage
+from . import credits, kraken, ocr_models, storage
 from .config import settings
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _stamp_timing(page_ids, *, submitted, finished, model_key, batch_size) -> None:
+    """Write OCR timing on the given pages via a fresh session so it survives a
+    rollback in run_ocr_job's failure path. Never raises (same pattern as app.audit)."""
+    from . import db as _db
+
+    session = sessionmaker(bind=_db.engine, autoflush=False, expire_on_commit=False)()
+    try:
+        (session.query(Page)
+         .filter(Page.id.in_(page_ids))
+         .update({
+             Page.ocr_submitted_at: submitted,
+             Page.ocr_finished_at: finished,
+             Page.ocr_model_key: model_key,
+             Page.ocr_batch_size: batch_size,
+         }, synchronize_session=False))
+        session.commit()
+    except Exception as exc:  # noqa: BLE001 — timing capture must never break a job
+        import sys
+        print(f"ocr timing stamp failed: {exc}", file=sys.stderr)
+        session.rollback()
+    finally:
+        session.close()
 
 
 def _page_file_bytes(page) -> bytes:
@@ -44,7 +74,14 @@ def enqueue_page_ocr(db: Session, page: Page) -> str:
 
     conn = Redis.from_url(settings.redis_url)
     queue = Queue(settings.queue_name, connection=conn, default_timeout=settings.kraken_timeout + 600)
-    payload = {"page_id": page.id, "kind": "image" if not page.content_type.startswith("application/pdf") else "pdf"}
+    model = ocr_models.resolve_active(db)
+    payload = {
+        "page_id": page.id,
+        "kind": "image" if not page.content_type.startswith("application/pdf") else "pdf",
+        "model_key": model["key"],
+        "seg_model_path": model["seg_path"],
+        "rec_model_path": model["rec_path"],
+    }
     job = queue.enqueue(
         "app.ocr_service.run_ocr_job",
         payload,
@@ -58,23 +95,29 @@ def enqueue_page_ocr(db: Session, page: Page) -> str:
 
 def run_ocr_job(payload: dict) -> dict:
     """RQ entrypoint (module-level function string reference)."""
-    from .db import SessionLocal
+    from . import db as _db
 
     page_id = payload["page_id"]
-    db = SessionLocal()
+    db = sessionmaker(bind=_db.engine, autoflush=False, expire_on_commit=False)()
+    page = None
     try:
-        page = db.query(Page).filter_by(id=page_id).one()
-        document = db.query(Document).filter_by(id=page.document_id).one()
         try:
+            # Inside the failure-handling try: a schema mismatch during a deploy
+            # window makes these queries throw too, and the page must still be
+            # flagged + its credits refunded.
+            page = db.query(Page).filter_by(id=page_id).one()
+            document = db.query(Document).filter_by(id=page.document_id).one()
             if page.content_type.startswith("application/pdf"):
-                _run_pdf(db, page, document)
+                _run_pdf(db, page, document, payload)
             else:
-                _run_image(db, page)
+                _run_image(db, page, payload)
             db.commit()
             return {"ok": True, "page_id": page.id}
         except Exception as exc:  # noqa: BLE001 — refund + flag, never crash silently
             db.rollback()
             message = str(exc)
+            if page is None:
+                page = db.query(Page).filter_by(id=page_id).one()
             targets = [page]
             if page.content_type.startswith("application/pdf"):
                 targets = (
@@ -90,20 +133,28 @@ def run_ocr_job(payload: dict) -> dict:
         db.close()
 
 
-def _run_image(db: Session, page: Page) -> None:
+def _run_image(db: Session, page: Page, payload: dict) -> None:
     page.processing_status = "transcribing"
     db.commit()
     file_bytes = _page_file_bytes(page)
     ext = "." + (page.storage_key.rsplit(".", 1)[-1] or "bin")
-    with httpx.Client() as http:
-        job_id = kraken.submit_ocr(http, file_bytes, ext)
-        page.kraken_job_id = job_id
-        db.commit()
-        result = kraken.wait_for_result(http, job_id)
+    page_id = page.id
+    submitted = _now()
+    try:
+        with httpx.Client() as http:
+            job_id = kraken.submit_ocr(http, file_bytes, ext,
+                                       seg_model_path=payload["seg_model_path"],
+                                       rec_model_path=payload["rec_model_path"])
+            page.kraken_job_id = job_id
+            db.commit()
+            result = kraken.wait_for_result(http, job_id)
+    finally:
+        _stamp_timing([page_id], submitted=submitted, finished=_now(),
+                      model_key=payload["model_key"], batch_size=1)
     _save_result(db, page, result.get("pages") or [])
 
 
-def _run_pdf(db: Session, page: Page, document: Document) -> None:
+def _run_pdf(db: Session, page: Page, document: Document, payload: dict) -> None:
     """One Kraken job for the whole PDF; siblings share the same storage_key."""
     siblings = (
         db.query(Page)
@@ -116,12 +167,20 @@ def _run_pdf(db: Session, page: Page, document: Document) -> None:
     db.commit()
 
     file_bytes = _page_file_bytes(page)
-    with httpx.Client() as http:
-        job_id = kraken.submit_ocr(http, file_bytes, ".pdf")
-        for p in siblings:
-            p.kraken_job_id = job_id
-        db.commit()
-        result = kraken.wait_for_result(http, job_id)
+    sibling_ids = [p.id for p in siblings]
+    submitted = _now()
+    try:
+        with httpx.Client() as http:
+            job_id = kraken.submit_ocr(http, file_bytes, ".pdf",
+                                       seg_model_path=payload["seg_model_path"],
+                                       rec_model_path=payload["rec_model_path"])
+            for p in siblings:
+                p.kraken_job_id = job_id
+            db.commit()
+            result = kraken.wait_for_result(http, job_id)
+    finally:
+        _stamp_timing(sibling_ids, submitted=submitted, finished=_now(),
+                      model_key=payload["model_key"], batch_size=len(sibling_ids))
     pages_result = result.get("pages") or []
     ordered = sorted(siblings, key=lambda p: (p.page_number, p.id))
     for idx, p in enumerate(ordered):
