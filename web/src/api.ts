@@ -83,6 +83,7 @@ export const api = {
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: body !== undefined ? body : {} }),
   patch: <T>(path: string, body: unknown) => request<T>(path, { method: 'PATCH', body }),
+  put: <T>(path: string, body: unknown) => request<T>(path, { method: 'PUT', body }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
   billing: {
     catalogue: () => request<BillingCatalogue>('/api/billing/catalogue'),
@@ -184,4 +185,23 @@ export interface PageDetail extends PageSummary {
   transcription: { id: string; raw_htr_text: string; edited_text: string; confidence: number; version: number } | null
   segments: Segment[]
   suggestions: Suggestion[]
+}
+
+export interface OcrModel { key: string; seg_path: string; rec_path: string }
+export interface OcrRecentRow {
+  page_id: string; document_id: string; document_title: string
+  processing_status: string
+  duration_s: number | null; per_page_s: number | null
+  model_key: string; avg_confidence: number | null; submitted_at: string | null
+}
+export interface OcrAggregate {
+  model_key: string; pages: number
+  median_s: number | null; p95_s: number | null; avg_confidence: number | null
+}
+export interface OcrPanelData {
+  models: OcrModel[]
+  active_key: string
+  active_source: 'setting' | 'env_default' | 'fallback'
+  recent: OcrRecentRow[]
+  aggregates: OcrAggregate[]
 }
