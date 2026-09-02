@@ -12,11 +12,16 @@ def _headers() -> dict:
     return {"X-API-Key": settings.kraken_api_key} if settings.kraken_api_key else {}
 
 
-def submit_ocr(client: httpx.Client, file_bytes: bytes, ext: str) -> str:
+def submit_ocr(client: httpx.Client, file_bytes: bytes, ext: str, *,
+               seg_model_path: str | None = None,
+               rec_model_path: str | None = None) -> str:
     """POST /jobs — returns the Kraken job id."""
+    data = {k: v for k, v in (("seg_model_path", seg_model_path),
+                              ("rec_model_path", rec_model_path)) if v}
     resp = client.post(
         f"{settings.kraken_api_url}/jobs",
         files={"file": (f"page{ext}", file_bytes)},
+        data=data or None,
         headers=_headers(),
         timeout=300,
     )
