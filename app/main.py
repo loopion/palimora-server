@@ -221,6 +221,10 @@ class GlossaryIn(BaseModel):
     is_preferred: bool = False
 
 
+class OcrModelIn(BaseModel):
+    key: str
+
+
 # ---------------------------------------------------------------- helpers
 def _own_document(db: Session, user: User, document_id: str) -> Document:
     doc = db.query(Document).filter_by(id=document_id).one_or_none()
@@ -1137,6 +1141,17 @@ def admin_ocr(db: Session = Depends(get_db), admin: User = Depends(get_admin_use
         "recent": recent,
         "aggregates": aggregates,
     }
+
+
+@app.put("/api/admin/ocr/model")
+def admin_set_ocr_model(payload: OcrModelIn, db: Session = Depends(get_db),
+                        admin: User = Depends(get_admin_user)):
+    try:
+        ocr_models.set_active(db, payload.key, admin)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.commit()
+    return {"active_key": payload.key}
 
 
 @app.get("/api/admin/billing/events")
