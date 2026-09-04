@@ -31,11 +31,11 @@ describe('ROUTE_PAIRS', () => {
 describe('useT', () => {
   test('resolves a dotted key to a string', () => {
     const t = useT('fr')
-    expect(t('home.hero.cta_primary')).toBe('Créer un compte — 100 pages offertes')
+    expect(t('home.hero.cta_primary')).toBe('Créer un compte')
   })
   test('resolves the same key in english', () => {
     const t = useT('en')
-    expect(t('home.hero.cta_primary')).toBe('Create an account — 100 free pages')
+    expect(t('home.hero.cta_primary')).toBe('Create an account')
   })
   test('returns raw arrays for list content', () => {
     const t = useT('fr')

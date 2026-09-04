@@ -5,7 +5,8 @@ import Home from './Home'
 test('renders the french hero by default', () => {
   render(<MemoryRouter initialEntries={['/']}><Home /></MemoryRouter>)
   expect(screen.getByRole('heading', { level: 1, name: /manuscrits ont une histoire/i })).toBeInTheDocument()
-  expect(screen.getByRole('link', { name: /100 pages offertes/i })).toHaveAttribute('href', '/register')
+  expect(screen.getByRole('link', { name: 'Créer un compte' })).toHaveAttribute('href', '/register')
+  expect(screen.getByText(/100 pages offertes/i)).toBeInTheDocument()
 })
 
 test('renders the english hero on /en', () => {
