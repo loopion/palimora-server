@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { renderToString } from 'react-dom/server'
 import { StaticRouter } from 'react-router-dom/server'
 import React from 'react'
+import { ROUTE_PAIRS } from '../src/i18n/index.ts'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 const distDir = path.join(root, '..', 'dist')
@@ -49,6 +50,14 @@ const routes = [
 
 const template = readFileSync(path.join(distDir, 'index.html'), 'utf-8')
 
+// Preserve the pristine Vite-built shell (empty #root, no prerendered
+// markup) as app.html before the loop below overwrites index.html with
+// the "/" route's rendered output. app/main.py's spa() catch-all serves
+// app.html for every app-only path (/station, /login, /admin, …) so those
+// pages get a clean client-side render instead of inheriting the
+// homepage's markup, <title>, and meta tags.
+writeFileSync(path.join(distDir, 'app.html'), template)
+
 function pageHtml({ path: routePath, lang, Page, title, description }) {
   const markup = renderToString(
     React.createElement(
@@ -57,7 +66,11 @@ function pageHtml({ path: routePath, lang, Page, title, description }) {
       React.createElement(PublicLayout, null, React.createElement(Page, null)),
     ),
   )
-  const canonical = `${SITE_URL}${routePath === '/' ? '' : routePath}`
+  const toUrl = (p) => `${SITE_URL}${p === '/' ? '' : p}`
+  const canonical = toUrl(routePath)
+  const otherPath = ROUTE_PAIRS[routePath]
+  const frHref = lang === 'fr' ? canonical : toUrl(otherPath)
+  const enHref = lang === 'en' ? canonical : toUrl(otherPath)
   let html = template
     .replace(/<html lang="[^"]*"/, `<html lang="${lang}"`)
     .replace(/<title>.*<\/title>/, `<title>${title}</title>`)
@@ -65,13 +78,15 @@ function pageHtml({ path: routePath, lang, Page, title, description }) {
       '</head>',
       `  <meta name="description" content="${description}" />\n` +
       `  <link rel="canonical" href="${canonical}" />\n` +
+      `  <link rel="alternate" hreflang="fr" href="${frHref}" />\n` +
+      `  <link rel="alternate" hreflang="en" href="${enHref}" />\n` +
       `  <meta property="og:title" content="${title}" />\n` +
       `  <meta property="og:description" content="${description}" />\n` +
       `  <meta property="og:image" content="${SITE_URL}/og.png" />\n` +
       `  <meta property="og:url" content="${canonical}" />\n` +
       `  </head>`,
     )
-    .replace('<div id="root"></div>', `<div id="root">${markup}</div>`)
+    .replace('<div id="root"></div>', `<div id="root" data-prerendered-path="${routePath}">${markup}</div>`)
   return html
 }
 

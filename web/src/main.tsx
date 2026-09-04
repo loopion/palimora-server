@@ -21,7 +21,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-function AppRoutes() {
+export function AppRoutes() {
   return (
     <Routes>
       <Route element={<PublicLayout />}>
@@ -56,11 +56,15 @@ const app = (
   </React.StrictMode>
 )
 
-// Prerendered public pages ship real markup in #root; hydrate instead of
-// clobbering it. App-only paths (no prerendered file) have an empty #root
-// and get a normal client render.
-if (rootEl.hasChildNodes()) {
+// Prerendered public pages ship real markup in #root, tagged with the
+// route it was rendered for (see web/scripts/prerender.mjs); hydrate only
+// when that tag matches the path actually being loaded. Everything else —
+// app-only paths served from app.html (empty #root, no tag), or a
+// prerendered file loaded at the wrong path — gets a normal client render
+// against a clean #root instead of hydrating against the wrong tree.
+if (rootEl.dataset.prerenderedPath === window.location.pathname) {
   ReactDOM.hydrateRoot(rootEl, app)
 } else {
+  rootEl.innerHTML = ''
   ReactDOM.createRoot(rootEl).render(app)
 }

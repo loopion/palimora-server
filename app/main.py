@@ -1293,4 +1293,13 @@ if os.path.isdir(STATIC_DIR) and os.path.exists(os.path.join(STATIC_DIR, "index.
         prerendered = os.path.join(STATIC_DIR, full_path, "index.html")
         if full_path and os.path.isfile(prerendered):
             return FileResponse(prerendered)
+        # Plain Vite SPA shell (empty #root) for every app-only path
+        # (/station, /login, /admin, …). app.html is written by the
+        # prerender step from the pristine build output, before "/"'s
+        # prerendered markup overwrites index.html — falling back to
+        # index.html keeps this working against an older build that
+        # predates the app.html step.
+        app_shell = os.path.join(STATIC_DIR, "app.html")
+        if os.path.isfile(app_shell):
+            return FileResponse(app_shell)
         return FileResponse(os.path.join(STATIC_DIR, "index.html"))
