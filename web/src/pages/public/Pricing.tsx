@@ -44,10 +44,16 @@ export default function Pricing() {
               >
                 <p style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-lg)', color: 'var(--color-ink)' }}>{pack.label}</p>
                 <p className="mt-2" style={{ fontSize: 'var(--text-2xl)', color: 'var(--color-ink)' }}>
-                  {pack.amount_eur.toFixed(0)} €{pack.kind === 'subscription' ? '/mois' : ''}
+                  {locale === 'en'
+                    ? `€${pack.amount_eur.toFixed(0)}`
+                    : `${pack.amount_eur.toFixed(0)} €`}
+                  {pack.kind === 'subscription' ? t('pricing.units.per_month') : ''}
                 </p>
                 <p className="mt-1 text-sm" style={{ color: 'var(--color-ink-soft)' }}>
-                  {pack.credits} crédits · {pack.price_per_page.toFixed(3)} €/page
+                  {pack.credits} {t('pricing.units.credits')} ·{' '}
+                  {locale === 'en'
+                    ? `€${pack.price_per_page.toFixed(3)}${t('pricing.units.per_page')}`
+                    : `${pack.price_per_page.toFixed(3)} ${t('pricing.units.per_page')}`}
                 </p>
               </li>
             ))}

@@ -74,6 +74,11 @@ export const en = {
     intro: '1 Palimora credit = 1 transcribed page. No page, no cost.',
     loading: 'Loading pricing…',
     error: 'Pricing temporarily unavailable — try again in a moment.',
+    units: {
+      credits: 'credits',
+      per_month: '/month',
+      per_page: '/page',
+    },
     credits_explainer: {
       title: 'How credits work',
       body: 'Every transcribed page uses 1 credit, handwritten or printed. AI-assisted correction costs nothing extra. Purchased credits never expire.',

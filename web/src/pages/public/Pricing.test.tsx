@@ -28,3 +28,19 @@ test('shows an error state if the catalogue fails to load', async () => {
   render(<MemoryRouter initialEntries={['/tarifs']}><Pricing /></MemoryRouter>)
   await waitFor(() => expect(screen.getByText(/momentanément indisponibles/i)).toBeInTheDocument())
 })
+
+test('renders english units on /en/pricing with no french fragments', async () => {
+  vi.mocked(api.billing.catalogue).mockResolvedValue({
+    packs: [
+      { id: 'atelier', kind: 'subscription', credits: 500, amount_eur: 39, price_per_page: 0.078, label: 'Atelier', stripe_price_id: '' },
+    ],
+    publishable_key: '',
+    enabled: true,
+  })
+  const { container } = render(<MemoryRouter initialEntries={['/en/pricing']}><Pricing /></MemoryRouter>)
+  expect(screen.getByRole('heading', { level: 1, name: /simple, per-page pricing/i })).toBeInTheDocument()
+  await waitFor(() => expect(screen.getByText('Atelier')).toBeInTheDocument())
+  expect(screen.getByText('€39/month')).toBeInTheDocument()
+  expect(screen.getByText('500 credits · €0.078/page')).toBeInTheDocument()
+  expect(container.textContent).not.toMatch(/crédits|\/mois/i)
+})
