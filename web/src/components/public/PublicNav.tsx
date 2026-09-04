@@ -25,6 +25,7 @@ export default function PublicNav({ locale, authed }: { locale: Locale; authed: 
           <Link to={aboutPath} style={{ color: 'var(--color-ink-soft)' }}>{t('common.nav.about')}</Link>
           <Link
             to={otherLocalePath}
+            aria-label={locale === 'fr' ? 'Switch to English' : 'Passer en français'}
             style={{ color: 'var(--color-ink-soft)' }}
           >
             {t('common.nav.lang_toggle')}
@@ -36,9 +37,6 @@ export default function PublicNav({ locale, authed }: { locale: Locale; authed: 
               background: 'var(--color-accent)',
               color: 'var(--color-accent-ink)',
               borderRadius: 'var(--radius-md)',
-              transitionProperty: 'transform',
-              transitionDuration: 'var(--dur-fast)',
-              transitionTimingFunction: 'var(--ease-out)',
             }}
           >
             {authed ? t('common.nav.cta_open_app') : t('common.nav.cta_signup')}

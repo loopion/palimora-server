@@ -85,8 +85,13 @@ export default function Home() {
       </section>
 
       <section
-        className="mx-auto max-w-5xl px-6 pb-16"
-        style={{ background: 'var(--color-paper-2)', borderRadius: 'var(--radius-lg)', padding: 'var(--space-8)' }}
+        className="mx-auto max-w-5xl"
+        style={{
+          background: 'var(--color-paper-2)',
+          borderRadius: 'var(--radius-lg)',
+          padding: 'var(--space-8)',
+          marginBottom: 'var(--space-16)',
+        }}
       >
         <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-2xl)', color: 'var(--color-ink)' }}>
           {t('home.pricing_teaser.title')}

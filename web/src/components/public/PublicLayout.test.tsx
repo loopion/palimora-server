@@ -42,6 +42,6 @@ test('authed visitor on a non-homepage public page is not redirected', () => {
 test('renders the language toggle pointing at the route pair', () => {
   vi.mocked(getToken).mockReturnValue(null)
   renderAt('/tarifs')
-  const toggle = screen.getByRole('link', { name: 'EN' })
+  const toggle = screen.getByRole('link', { name: /switch to english/i })
   expect(toggle).toHaveAttribute('href', '/en/pricing')
 })
