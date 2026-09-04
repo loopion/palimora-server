@@ -9,7 +9,9 @@ export default function About() {
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-16">
-      <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-display-s)', color: 'var(--color-ink)' }}>
+      <h1
+        style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-display-s)', color: 'var(--color-ink)', overflowWrap: 'anywhere', minWidth: 0 }}
+      >
         {t('about.title')}
       </h1>
       <div className="mt-8 space-y-5" style={{ fontSize: 'var(--text-lg)', color: 'var(--color-ink-soft)' }}>

@@ -95,6 +95,10 @@
 }
 
 html, body, #root { height: 100%; }
+/* Hard requirement (Hallmark slop-test gate 34): overflow-x: clip, not
+   hidden, so any accidental overflow never produces a horizontal scrollbar
+   while sticky/fixed descendants keep working. */
+html, body { overflow-x: clip; }
 
 /* Visible keyboard-focus ring, token-driven, no transition (must show instantly). */
 a:focus-visible, button:focus-visible {
