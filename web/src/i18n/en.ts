@@ -25,7 +25,8 @@ export const en = {
       title: 'Your manuscripts have a story to tell.',
       subtitle:
         'Palimora transcribes handwritten and historical printed documents — difficult hands, multi-page PDFs, historical scripts — so you can read, search, and cite, not just archive.',
-      cta_primary: 'Create an account — 100 free pages',
+      cta_primary: 'Create an account',
+      cta_primary_note: '100 free pages on signup',
       cta_secondary: 'See how it works',
     },
     workbench: {
@@ -65,7 +66,7 @@ export const en = {
     },
     closing: {
       title: 'Ready to make your archives speak?',
-      cta: 'Create a free account',
+      cta: 'Sign up',
     },
   },
   pricing: {

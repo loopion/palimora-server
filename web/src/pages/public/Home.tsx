@@ -23,14 +23,17 @@ export default function Home() {
         <p className="mt-6 max-w-2xl" style={{ fontSize: 'var(--text-lg)', color: 'var(--color-ink-soft)' }}>
           {t('home.hero.subtitle')}
         </p>
-        <div className="mt-8 flex flex-wrap gap-4">
-          <Link
-            to={registerPath}
-            className="rounded-md px-6 py-3 font-medium"
-            style={{ background: 'var(--color-accent)', color: 'var(--color-accent-ink)', borderRadius: 'var(--radius-md)' }}
-          >
-            {t('home.hero.cta_primary')}
-          </Link>
+        <div className="mt-8 flex flex-wrap items-start gap-x-4 gap-y-2">
+          <div>
+            <Link
+              to={registerPath}
+              className="inline-block rounded-md px-6 py-3 font-medium"
+              style={{ background: 'var(--color-accent)', color: 'var(--color-accent-ink)', borderRadius: 'var(--radius-md)' }}
+            >
+              {t('home.hero.cta_primary')}
+            </Link>
+            <p className="mt-2 text-sm" style={{ color: 'var(--color-ink-soft)' }}>{t('home.hero.cta_primary_note')}</p>
+          </div>
           <a
             href="#comment-ca-marche"
             className="rounded-md px-6 py-3 font-medium"

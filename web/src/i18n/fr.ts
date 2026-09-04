@@ -25,7 +25,8 @@ export const fr = {
       title: 'Vos manuscrits ont une histoire à raconter.',
       subtitle:
         'Palimora transcrit vos documents manuscrits et imprimés anciens — écritures difficiles, PDF multipages, scripts historiques — pour que vous puissiez lire, chercher et citer, pas seulement archiver.',
-      cta_primary: 'Créer un compte — 100 pages offertes',
+      cta_primary: 'Créer un compte',
+      cta_primary_note: '100 pages offertes à l’inscription',
       cta_secondary: 'Voir comment ça marche',
     },
     workbench: {
@@ -65,7 +66,7 @@ export const fr = {
     },
     closing: {
       title: 'Prêt à faire parler vos archives ?',
-      cta: 'Créer un compte gratuitement',
+      cta: "S'inscrire",
     },
   },
   pricing: {
