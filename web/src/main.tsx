@@ -46,25 +46,29 @@ export function AppRoutes() {
   )
 }
 
-const rootEl = document.getElementById('root')!
-const app = (
-  <React.StrictMode>
-    <BrowserRouter>
-      <ImpersonationBanner />
-      <AppRoutes />
-    </BrowserRouter>
-  </React.StrictMode>
-)
+// Guarded on rootEl existing so importing AppRoutes for tests (main.test.tsx)
+// doesn't try to mount into a #root jsdom never creates.
+const rootEl = document.getElementById('root')
+if (rootEl) {
+  const app = (
+    <React.StrictMode>
+      <BrowserRouter>
+        <ImpersonationBanner />
+        <AppRoutes />
+      </BrowserRouter>
+    </React.StrictMode>
+  )
 
-// Prerendered public pages ship real markup in #root, tagged with the
-// route it was rendered for (see web/scripts/prerender.mjs); hydrate only
-// when that tag matches the path actually being loaded. Everything else —
-// app-only paths served from app.html (empty #root, no tag), or a
-// prerendered file loaded at the wrong path — gets a normal client render
-// against a clean #root instead of hydrating against the wrong tree.
-if (rootEl.dataset.prerenderedPath === window.location.pathname) {
-  ReactDOM.hydrateRoot(rootEl, app)
-} else {
-  rootEl.innerHTML = ''
-  ReactDOM.createRoot(rootEl).render(app)
+  // Prerendered public pages ship real markup in #root, tagged with the
+  // route it was rendered for (see web/scripts/prerender.mjs); hydrate only
+  // when that tag matches the path actually being loaded. Everything else —
+  // app-only paths served from app.html (empty #root, no tag), or a
+  // prerendered file loaded at the wrong path — gets a normal client render
+  // against a clean #root instead of hydrating against the wrong tree.
+  if (rootEl.dataset.prerenderedPath === window.location.pathname) {
+    ReactDOM.hydrateRoot(rootEl, app)
+  } else {
+    rootEl.innerHTML = ''
+    ReactDOM.createRoot(rootEl).render(app)
+  }
 }
