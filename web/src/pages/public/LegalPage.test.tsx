@@ -22,3 +22,14 @@ test('renders the terms namespace on the same component', () => {
   expect(screen.getByRole('heading', { level: 1, name: /Conditions générales/i })).toBeInTheDocument()
   expect(screen.getByText('Droit applicable')).toBeInTheDocument()
 })
+
+test('renders the english privacy namespace on /en/privacy', () => {
+  render(
+    <MemoryRouter initialEntries={['/en/privacy']}>
+      <LegalPage namespace="privacy" />
+    </MemoryRouter>,
+  )
+  expect(screen.getByRole('heading', { level: 1, name: /Privacy policy/i })).toBeInTheDocument()
+  expect(screen.getByText('Data controller')).toBeInTheDocument()
+  expect(screen.getByText('Your rights')).toBeInTheDocument()
+})

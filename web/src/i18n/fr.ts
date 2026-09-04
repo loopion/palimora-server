@@ -74,6 +74,11 @@ export const fr = {
     intro: '1 crédit Palimora = 1 page transcrite. Aucune page, aucun coût.',
     loading: 'Chargement des tarifs…',
     error: 'Tarifs momentanément indisponibles — réessayez dans un instant.',
+    units: {
+      credits: 'crédits',
+      per_month: '/mois',
+      per_page: '€/page',
+    },
     credits_explainer: {
       title: 'Comment fonctionnent les crédits',
       body: 'Chaque page transcrite consomme 1 crédit, manuscrite ou imprimée. La correction assistée par IA ne coûte rien de plus. Les crédits achetés n’expirent pas.',
