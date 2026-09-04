@@ -5,7 +5,7 @@ import { localeFromPath } from '../../i18n'
 import PublicNav from './PublicNav'
 import PublicFooter from './PublicFooter'
 
-export default function PublicLayout() {
+export default function PublicLayout({ children }: { children?: React.ReactNode } = {}) {
   const { pathname } = useLocation()
   const locale = localeFromPath(pathname)
   const [authed, setAuthed] = useState(false)
@@ -24,9 +24,7 @@ export default function PublicLayout() {
   return (
     <div style={{ background: 'var(--color-paper)', minHeight: '100%', fontFamily: 'var(--font-body)' }}>
       <PublicNav locale={locale} authed={authed} />
-      <main>
-        <Outlet />
-      </main>
+      <main>{children ?? <Outlet />}</main>
       <PublicFooter locale={locale} />
     </div>
   )
