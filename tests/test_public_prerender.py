@@ -32,7 +32,7 @@ def _make_app(static_dir: str) -> FastAPI:
         if full_path and os.path.isfile(prerendered):
             return FileResponse(prerendered)
         app_shell = os.path.join(static_dir, "app.html")
-        if os.path.isfile(app_shell):
+        if full_path and os.path.isfile(app_shell):
             return FileResponse(app_shell)
         return FileResponse(os.path.join(static_dir, "index.html"))
 
@@ -94,6 +94,25 @@ def test_app_only_path_serves_app_shell_not_the_homepage(tmp_path):
     assert "manuscrits ont une histoire" not in resp.text
     assert 'data-prerendered-path' not in resp.text
     assert '<div id="root"></div>' in resp.text
+
+
+def test_root_path_serves_prerendered_homepage_not_app_shell(tmp_path):
+    """Regression test: GET / (full_path == "") must serve the prerendered
+    homepage (index.html), not the empty app.html shell, even when both
+    files exist in the static directory."""
+    static_dir = str(tmp_path)
+    _write(
+        static_dir,
+        "index.html",
+        '<html><body><div id="root" data-prerendered-path="/">'
+        '<h1>Vos manuscrits ont une histoire à raconter.</h1></div></body></html>',
+    )
+    _write(static_dir, "app.html", '<html><body><div id="root"></div></body></html>')
+    client = TestClient(_make_app(static_dir))
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "manuscrits ont une histoire" in resp.text
+    assert 'data-prerendered-path="/"' in resp.text
 
 
 def test_app_only_path_falls_back_to_root_index_without_app_shell(tmp_path):

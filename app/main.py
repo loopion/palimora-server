@@ -1300,6 +1300,6 @@ if os.path.isdir(STATIC_DIR) and os.path.exists(os.path.join(STATIC_DIR, "index.
         # index.html keeps this working against an older build that
         # predates the app.html step.
         app_shell = os.path.join(STATIC_DIR, "app.html")
-        if os.path.isfile(app_shell):
+        if full_path and os.path.isfile(app_shell):
             return FileResponse(app_shell)
         return FileResponse(os.path.join(STATIC_DIR, "index.html"))
