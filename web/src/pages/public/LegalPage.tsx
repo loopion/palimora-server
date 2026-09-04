@@ -9,7 +9,9 @@ export default function LegalPage({ namespace }: { namespace: 'privacy' | 'terms
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-16">
-      <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-display-s)', color: 'var(--color-ink)' }}>
+      <h1
+        style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-display-s)', color: 'var(--color-ink)', overflowWrap: 'anywhere', minWidth: 0 }}
+      >
         {t(`${namespace}.title`)}
       </h1>
       <p className="mt-4 text-sm italic" style={{ color: 'var(--color-ink-soft)' }}>{t(`${namespace}.intro`)}</p>

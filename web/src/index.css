@@ -6,6 +6,10 @@
 @import "tailwindcss";
 
 html, body, #root { height: 100%; }
+/* Hard requirement (Hallmark slop-test gate 34): overflow-x: clip, not
+   hidden, so any accidental overflow never produces a horizontal scrollbar
+   while sticky/fixed descendants keep working. */
+html, body { overflow-x: clip; }
 body { @apply bg-slate-100 text-slate-900; font-family: system-ui, -apple-system, sans-serif; }
 
 /* Visible keyboard-focus ring, token-driven, no transition (must show instantly). */

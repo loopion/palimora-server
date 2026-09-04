@@ -25,7 +25,9 @@ export default function Pricing() {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-16">
-      <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-display-s)', color: 'var(--color-ink)' }}>
+      <h1
+        style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-display-s)', color: 'var(--color-ink)', overflowWrap: 'anywhere', minWidth: 0 }}
+      >
         {t('pricing.title')}
       </h1>
       <p className="mt-4 max-w-2xl" style={{ color: 'var(--color-ink-soft)' }}>{t('pricing.intro')}</p>

@@ -32,3 +32,12 @@ Env vars the operator must set (server + worker):
 | `AI_CORRECTION_COST_POINTS` | `0` (AI correction is free) |
 | `SIGNUP_BONUS_POINTS` | `100` |
 | `REBASE_TOPUP_TO` | `0`; set to `100` for one deploy to top existing users up |
+
+## Public homepage (Plan D)
+
+Public marketing pages (`/`, `/tarifs`, `/a-propos`, `/confidentialite`,
+`/cgu` and their `/en/...` counterparts) are prerendered at build time —
+see `web/scripts/prerender.mjs`. Interim domain:
+`https://home.palimora.pays.fr.eu.org` (set as a Coolify domain alias on
+the existing app; will move to `https://palimora.fr` once registered).
+Design spec: `docs/superpowers/specs/2026-09-04-d-homepage-design.md`.
