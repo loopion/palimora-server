@@ -25,8 +25,14 @@ for (const [file, needle] of expected) {
     const full = path.join(dist, file)
     assert.ok(existsSync(full), `${full} missing — run the build first`)
     const html = readFileSync(full, 'utf-8')
-    assert.match(html, /<div id="root">.+<\/div>/s, `${file} has an empty #root`)
-    assert.ok(html.includes(needle), `${file} missing expected content "${needle}"`)
+    // Scope to the <main> element specifically — not the whole document —
+    // so this can't pass on nav/footer boilerplate or a needle that also
+    // happens to appear in <meta name="description">.
+    const mainMatch = html.match(/<main>([\s\S]*?)<\/main>/)
+    assert.ok(mainMatch, `${file} has no <main> element`)
+    const mainContent = mainMatch[1].trim()
+    assert.notEqual(mainContent, '', `${file} has an empty <main>`)
+    assert.ok(mainContent.includes(needle), `${file} <main> missing expected content "${needle}"`)
   })
 }
 
