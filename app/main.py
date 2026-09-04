@@ -1287,4 +1287,10 @@ if os.path.isdir(STATIC_DIR) and os.path.exists(os.path.join(STATIC_DIR, "index.
         target = os.path.join(STATIC_DIR, full_path)
         if full_path and os.path.isfile(target):
             return FileResponse(target)
+        # Prerendered public pages (Plan D): a directory named after the
+        # route holding its own index.html, e.g. static/tarifs/index.html
+        # for /tarifs, static/en/pricing/index.html for /en/pricing.
+        prerendered = os.path.join(STATIC_DIR, full_path, "index.html")
+        if full_path and os.path.isfile(prerendered):
+            return FileResponse(prerendered)
         return FileResponse(os.path.join(STATIC_DIR, "index.html"))
