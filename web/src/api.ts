@@ -187,7 +187,39 @@ export interface PageDetail extends PageSummary {
   suggestions: Suggestion[]
 }
 
-export interface OcrModel { key: string; seg_path: string; rec_path: string }
+export interface LocalModel {
+  slug: string
+  protected: boolean
+  doi: string | null
+  summary: string
+  script: string | null
+  keywords: string[]
+  license: string | null
+  size_bytes: number
+}
+export interface CatalogModel {
+  doi: string
+  summary: string
+  script: string | null
+  keywords: string[]
+  license: string | null
+  already_local: boolean
+}
+export interface CatalogResponse {
+  cached_at: string | null
+  stale: boolean
+  refreshing: boolean
+  models: CatalogModel[]
+}
+export interface ModelJob {
+  kind: 'pull' | 'refresh'
+  job_id: string
+  status: 'started' | 'finished' | 'failed'
+  doi?: string
+  slug?: string
+  error: string | null
+  progress?: number
+}
 export interface OcrRecentRow {
   page_id: string; document_id: string; document_title: string
   processing_status: string
@@ -199,9 +231,11 @@ export interface OcrAggregate {
   median_s: number | null; p95_s: number | null; avg_confidence: number | null
 }
 export interface OcrPanelData {
-  models: OcrModel[]
+  local_models: LocalModel[]
   active_key: string
-  active_source: 'setting' | 'env_default' | 'fallback'
+  active_slug: string
+  active_source: 'setting' | 'fallback'
+  kraken_error?: string | null
   recent: OcrRecentRow[]
   aggregates: OcrAggregate[]
 }

@@ -12,6 +12,28 @@ def _headers() -> dict:
     return {"X-API-Key": settings.kraken_api_key} if settings.kraken_api_key else {}
 
 
+def _client(timeout: float) -> httpx.Client:
+    """Client factory — a seam so tests can inject an httpx.MockTransport."""
+    return httpx.Client(timeout=timeout)
+
+
+def call(method: str, path: str, *, json_body: dict | None = None,
+         params: dict | None = None, timeout: float = 30.0) -> httpx.Response:
+    """One call to the Kraken service with the API-key header. Raises KrakenError
+    on transport failure or a 5xx; returns the Response otherwise (callers inspect
+    4xx themselves)."""
+    url = f"{settings.kraken_api_url}{path}"
+    try:
+        with _client(timeout) as client:
+            resp = client.request(method, url, json=json_body, params=params,
+                                  headers=_headers())
+    except httpx.HTTPError as exc:
+        raise KrakenError(f"Kraken {method} {path} injoignable: {exc}") from exc
+    if resp.status_code >= 500:
+        raise KrakenError(f"Kraken {method} {path} a répondu {resp.status_code}")
+    return resp
+
+
 def submit_ocr(client: httpx.Client, file_bytes: bytes, ext: str, *,
                seg_model_path: str | None = None,
                rec_model_path: str | None = None) -> str:

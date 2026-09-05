@@ -75,6 +75,7 @@ def enqueue_page_ocr(db: Session, page: Page) -> str:
     conn = Redis.from_url(settings.redis_url)
     queue = Queue(settings.queue_name, connection=conn, default_timeout=settings.kraken_timeout + 600)
     model = ocr_models.resolve_active(db)
+    # seg_path is always None since E3-B: Kraken uses its baked /models/seg.mlmodel.
     payload = {
         "page_id": page.id,
         "kind": "image" if not page.content_type.startswith("application/pdf") else "pdf",

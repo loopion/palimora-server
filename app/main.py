@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 
 import pypdf
-from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -224,6 +224,10 @@ class GlossaryIn(BaseModel):
 
 class OcrModelIn(BaseModel):
     key: str
+
+
+class ModelPullIn(BaseModel):
+    doi: str
 
 
 # ---------------------------------------------------------------- helpers
@@ -1077,10 +1081,65 @@ def _percentiles(durations: list[float]):
     return rank(0.5), rank(0.95)
 
 
+def _kraken_proxy(method: str, path: str, **kw) -> dict:
+    """Relay one call to the Kraken model-management API. Transport failure or a
+    5xx → 502; a 4xx is relayed with Kraken's own status + detail."""
+    try:
+        resp = kraken.call(method, path, **kw)
+    except kraken.KrakenError:
+        raise HTTPException(status_code=502, detail="Service Kraken injoignable")
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {"detail": resp.text[:300]}
+    if resp.status_code >= 400:
+        detail = body.get("detail") if isinstance(body, dict) else None
+        raise HTTPException(status_code=resp.status_code,
+                            detail=detail or f"Kraken a répondu {resp.status_code}")
+    return body
+
+
+def _audit_pull_outcome(db: Session, admin: User, job_id: str, job: dict) -> None:
+    """Record the real outcome of a pull, once, as the SPA polls it through us.
+
+    The pull's 202 only logs the intent; this is the counter-entry. Written from
+    Kraken's own job payload (never from a client-reported result), and guarded
+    on the audit path so repeated polls, a page refresh, or two admins watching
+    the same pull still produce exactly one row."""
+    if not isinstance(job, dict) or job.get("kind") != "pull":
+        return
+    status = job.get("status")
+    if status not in ("finished", "failed"):
+        return
+    path = f"/api/admin/ocr/models/jobs/{job_id}"
+    already = (
+        db.query(AdminAuditLog)
+        .filter_by(event="ocr.model_pull_done", path=path)
+        .first()
+    )
+    if already:
+        return
+    if status == "finished":
+        # The new model is on the volume now — don't make the panel wait out the TTL.
+        ocr_models.invalidate()
+    db.add(AdminAuditLog(
+        actor_user_id=admin.id, target_user_id=None,
+        event="ocr.model_pull_done", method="GET", path=path,
+        status_code=200 if status == "finished" else 500))
+    db.commit()
+
+
 @app.get("/api/admin/ocr")
 def admin_ocr(db: Session = Depends(get_db), admin: User = Depends(get_admin_user)):
     from datetime import timedelta
 
+    try:
+        local_models = ocr_models.list_models()
+        kraken_error = None
+    except kraken.KrakenError:
+        local_models = []
+        kraken_error = "Service Kraken injoignable"
+    # Both read the (now warm or empty) 60 s cache — no second round trip.
     active = ocr_models.resolve_active(db)
     recent_rows = (
         db.query(Page, Document.title)
@@ -1168,12 +1227,65 @@ def admin_ocr(db: Session = Depends(get_db), admin: User = Depends(get_admin_use
         })
 
     return {
-        "models": ocr_models.list_models(),
+        "local_models": local_models,
         "active_key": active["key"],
+        "active_slug": ocr_models.active_slug(db),
         "active_source": ocr_models.active_source(db),
+        "kraken_error": kraken_error,
         "recent": recent,
         "aggregates": aggregates,
     }
+
+
+@app.get("/api/admin/ocr/catalog")
+def admin_ocr_catalog(script: str = "Latn", all_: bool = Query(False, alias="all"),
+                      admin: User = Depends(get_admin_user)):
+    return _kraken_proxy("GET", "/repo",
+                         params={"script": script, "all": "true" if all_ else "false"})
+
+
+@app.post("/api/admin/ocr/catalog/refresh", status_code=202)
+def admin_ocr_catalog_refresh(admin: User = Depends(get_admin_user)):
+    return _kraken_proxy("POST", "/repo/refresh")
+
+
+@app.get("/api/admin/ocr/models/jobs/{job_id}")
+def admin_ocr_model_job(job_id: str, db: Session = Depends(get_db),
+                        admin: User = Depends(get_admin_user)):
+    job = _kraken_proxy("GET", f"/models/jobs/{job_id}")
+    _audit_pull_outcome(db, admin, job_id, job)
+    return job
+
+
+@app.post("/api/admin/ocr/models", status_code=202)
+def admin_pull_ocr_model(payload: ModelPullIn, db: Session = Depends(get_db),
+                         admin: User = Depends(get_admin_user)):
+    body = _kraken_proxy("POST", "/models", json_body={"doi": payload.doi.strip()},
+                         timeout=60.0)
+    db.add(AdminAuditLog(
+        actor_user_id=admin.id, target_user_id=None,
+        event="ocr.model_pull", method="POST",
+        path="/api/admin/ocr/models", status_code=202))
+    db.commit()
+    return body
+
+
+@app.delete("/api/admin/ocr/models/{slug}")
+def admin_delete_ocr_model(slug: str, db: Session = Depends(get_db),
+                           admin: User = Depends(get_admin_user)):
+    if slug == ocr_models.active_slug(db):
+        raise HTTPException(
+            status_code=409,
+            detail="Modèle actif, impossible de supprimer. "
+                   "Change le modèle actif d'abord.")
+    body = _kraken_proxy("DELETE", f"/models/{slug}")
+    ocr_models.invalidate()
+    db.add(AdminAuditLog(
+        actor_user_id=admin.id, target_user_id=None,
+        event="ocr.model_delete", method="DELETE",
+        path=f"/api/admin/ocr/models/{slug}", status_code=200))
+    db.commit()
+    return body
 
 
 @app.put("/api/admin/ocr/model")
@@ -1183,6 +1295,8 @@ def admin_set_ocr_model(payload: OcrModelIn, db: Session = Depends(get_db),
         ocr_models.set_active(db, payload.key, admin)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except kraken.KrakenError:
+        raise HTTPException(status_code=502, detail="Service Kraken injoignable")
     db.commit()
     return {"active_key": payload.key}
 
