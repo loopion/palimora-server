@@ -2,20 +2,25 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import OpenSeadragon from 'openseadragon'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, getImpersonation, getToken, Me, PageDetail, PageSummary, QueueItem, Segment, setToken } from '../api'
+import Mark from '../components/Mark'
 import { usePrompt } from '../components/PromptModal'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 
 const statusBadge: Record<string, string> = {
-  draft: 'bg-slate-200 text-slate-700',
-  queued: 'bg-amber-100 text-amber-800',
-  processing: 'bg-blue-100 text-blue-800',
-  to_review: 'bg-violet-100 text-violet-800',
-  validated: 'bg-emerald-100 text-emerald-800',
+  draft: 'bg-muted text-muted-foreground',
+  queued: 'bg-warning/15 text-warning',
+  processing: 'bg-primary/10 text-primary',
+  to_review: 'bg-primary/15 text-primary',
+  validated: 'bg-success/15 text-success',
 }
 
 function confColor(c: number) {
-  if (c >= 0.9) return 'border-emerald-400 bg-emerald-50'
-  if (c >= 0.7) return 'border-amber-400 bg-amber-50'
-  return 'border-red-400 bg-red-50'
+  if (c >= 0.9) return 'border-success/50 bg-success/8'
+  if (c >= 0.7) return 'border-warning/50 bg-warning/8'
+  return 'border-destructive/50 bg-destructive/8'
 }
 
 interface SearchHit {
@@ -321,24 +326,28 @@ export default function Station() {
 
   return (
     <div className="h-screen flex flex-col">
-      <header className="bg-white border-b px-4 py-2 flex items-center gap-3 relative">
-        <span className="text-xl font-semibold">📜 Palimora</span>
-        <span className="text-sm bg-indigo-50 text-indigo-700 rounded-full px-3 py-1">
-          {me ? `${me.credit_balance} crédits` : '…'}
+      <header className="bg-card border-b px-4 py-2.5 flex items-center gap-3 relative">
+        <span className="flex items-center gap-2">
+          <Mark size={26} />
+          <span className="font-display text-lg font-semibold">Palimora</span>
         </span>
-        <Link to="/billing" className="text-sm text-indigo-600 hover:underline">Acheter des crédits</Link>
+        <Badge variant="secondary">{me ? `${me.credit_balance} crédits` : '…'}</Badge>
+        <Button variant="link" size="sm" asChild>
+          <Link to="/billing">Acheter des crédits</Link>
+        </Button>
         <div className="flex-1 max-w-md relative">
-          <input ref={searchInputRef}
-                 className="w-full border rounded-lg px-3 py-1.5 text-sm"
+          <Input ref={searchInputRef}
                  placeholder="Rechercher dans les transcriptions… ( / )"
                  value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
           {searchHits && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg max-h-80 overflow-y-auto thin-scroll z-50">
-              {searchHits.length === 0 && <p className="p-3 text-sm text-slate-400">Aucun résultat.</p>}
+            <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-lg shadow-lg max-h-80 overflow-y-auto thin-scroll z-50">
+              {searchHits.length === 0 && (
+                <p className="p-3 text-sm text-muted-foreground">Aucun résultat.</p>
+              )}
               {searchHits.map((h, i) => (
                 <button key={i} onClick={() => openHit(h)}
-                        className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b last:border-0">
-                  <p className="text-xs text-slate-500">{h.document_title} — page {h.page_number}</p>
+                        className="w-full text-left px-3 py-2 hover:bg-muted border-b last:border-0">
+                  <p className="text-xs text-muted-foreground">{h.document_title} — page {h.page_number}</p>
                   <p className="text-sm">…{h.snippet}…</p>
                 </button>
               ))}
@@ -346,43 +355,49 @@ export default function Station() {
           )}
         </div>
         <div className="flex-1" />
-        {me?.is_admin && <Link className="text-sm text-slate-500 hover:text-slate-800" to="/admin">Admin</Link>}
-        <button className="text-sm text-slate-500 hover:text-slate-800"
-                onClick={() => { setToken(null); navigate('/login') }}>Déconnexion</button>
+        {me?.is_admin && (
+          <Button variant="ghost" size="sm" asChild><Link to="/admin">Admin</Link></Button>
+        )}
+        <Button variant="ghost" size="sm"
+                onClick={() => { setToken(null); navigate('/login') }}>Déconnexion</Button>
       </header>
 
       {/* ZONE 1 — file de traitement */}
-      <section className="bg-slate-50 border-b px-4 py-3 shrink-0 flex flex-col min-h-0"
+      <section className="bg-muted border-b px-4 py-3 shrink-0 flex flex-col min-h-0"
                style={{ height: queueH }}>
         <div className="flex items-center gap-2 mb-2 shrink-0">
-          <h2 className="text-sm font-semibold text-slate-600">File de traitement</h2>
-          <button onClick={newDocument}
-                  className="text-xs bg-indigo-600 text-white rounded-md px-2 py-1">+ Document</button>
-          <label className={`text-xs bg-slate-200 text-slate-700 rounded-md px-2 py-1 cursor-pointer
+          <h2 className="font-display text-sm font-semibold">File de traitement</h2>
+          <Button size="xs" onClick={newDocument}>+ Document</Button>
+          <label className={`inline-flex h-6 cursor-pointer items-center rounded-lg bg-secondary
+                             px-2 text-xs font-medium text-secondary-foreground
                              ${docId ? '' : 'opacity-40 pointer-events-none'}`}>
             {busy === 'upload' ? 'Envoi…' : '+ Envoyer des fichiers'}
             <input ref={fileInput} type="file" multiple hidden
                    accept="image/png,image/jpeg,image/webp,image/tiff,image/heic,image/heif,application/pdf"
                    onChange={(e) => handleUpload(e.target.files)} />
           </label>
-          {!docId && <span className="text-xs text-slate-400">sélectionne un document ci-dessous</span>}
+          {!docId && (
+            <span className="text-xs text-muted-foreground">sélectionne un document ci-dessous</span>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto thin-scroll space-y-3">
           {queue.length === 0 && (
-            <p className="text-sm text-slate-400 p-4">Aucun document — crée-en un puis envoie des captures.</p>
+            <p className="text-sm text-muted-foreground p-4">
+              Aucun document — crée-en un puis envoie des captures.
+            </p>
           )}
           {groupedQueue.map(([group, docs]) => (
             <div key={group}>
-              <div className="flex items-center gap-1.5 mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              <div className="flex items-center gap-1.5 mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 <span>{group === UNTAGGED ? '📄' : '📁'}</span>
                 <span>{group}</span>
-                <span className="text-slate-300">({docs.length})</span>
+                <span className="opacity-60">({docs.length})</span>
               </div>
               <div className="flex gap-3 overflow-x-auto thin-scroll pb-1">
                 {docs.map((d) => (
                   <div key={d.id} onClick={() => selectDoc(d.id)}
-                       className={`min-w-56 cursor-pointer text-left bg-white rounded-lg border p-3 shadow-sm hover:border-indigo-400
-                                   ${docId === d.id ? 'border-indigo-500 ring-1 ring-indigo-400' : ''}`}>
+                       className={`min-w-56 cursor-pointer text-left bg-card rounded-lg border p-3 shadow-sm transition-colors hover:border-primary/50
+                                   ${docId === d.id ? 'border-primary ring-1 ring-primary/40' : ''}`}>
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium text-sm truncate">{d.title}</span>
                       <span className={`text-[10px] rounded-full px-2 py-0.5 ${statusBadge[d.status] || ''}`}>
@@ -391,24 +406,24 @@ export default function Station() {
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-1">
                       {d.tags.map((t) => (
-                        <span key={t} className="text-[10px] bg-slate-100 text-slate-600 rounded px-1.5 py-0.5">{t}</span>
+                        <span key={t} className="text-[10px] bg-muted text-muted-foreground rounded px-1.5 py-0.5">{t}</span>
                       ))}
-                      <button className="text-[10px] text-indigo-500 hover:underline"
+                      <button className="text-[10px] text-primary hover:underline"
                               onClick={(e) => editTags(d, e)}>
                         {d.tags.length ? 'éditer' : '＋ dossier'}
                       </button>
                     </div>
-                    <div className="mt-2 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-500" style={{
+                    <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div className="h-full bg-primary" style={{
                         width: d.pages ? `${Math.round((d.done / d.pages) * 100)}%` : '0%' }} />
                     </div>
-                    <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
+                    <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
                       <span>{d.done}/{d.pages} pages</span>
-                      {d.validated > 0 && <span className="text-emerald-600">✓ {d.validated}</span>}
-                      {d.error > 0 && <span className="text-red-600">⚠ {d.error}</span>}
+                      {d.validated > 0 && <span className="text-success">✓ {d.validated}</span>}
+                      {d.error > 0 && <span className="text-destructive">⚠ {d.error}</span>}
                       <div className="flex-1" />
                       {d.status !== 'validated' && d.done === d.pages && d.pages > 0 && (
-                        <span role="button" className="text-indigo-600"
+                        <span role="button" className="text-primary font-medium"
                               onClick={(e) => { e.stopPropagation(); validateDoc(d) }}>Valider</span>
                       )}
                     </div>
@@ -422,49 +437,60 @@ export default function Station() {
 
       {/* poignée de redimensionnement vertical */}
       <div onMouseDown={dragQueue}
-           className="h-1.5 bg-slate-200 hover:bg-indigo-400 cursor-row-resize shrink-0 transition-colors" />
+           className="h-1.5 bg-border hover:bg-primary cursor-row-resize shrink-0 transition-colors" />
 
       {/* ZONES 2 & 3 */}
       <main className="flex-1 flex min-h-0">
         <Viewer page={page} pages={pages} onSelect={loadPage} activeSegmentId={activeSegmentId}
                 onSegmentPick={onSegmentClick} widthPct={viewerW} />
         <div onMouseDown={dragSplit}
-             className="w-1.5 bg-slate-200 hover:bg-indigo-400 cursor-col-resize shrink-0 transition-colors" />
+             className="w-1.5 bg-border hover:bg-primary cursor-col-resize shrink-0 transition-colors" />
         <section className="flex-1 min-w-0 border-l flex flex-col min-h-0">
-          <div className="px-3 py-2 border-b bg-white text-sm font-semibold text-slate-600 shrink-0">
+          <div className="px-3 py-2 border-b bg-card font-display text-sm font-semibold shrink-0">
             Transcription
           </div>
           {page ? (
             <>
-              <div className="flex items-center gap-2 px-3 py-2 border-b bg-white">
-                <h3 className="text-sm font-semibold">Page {page.page_number}</h3>
-                <span className={`text-[10px] rounded-full px-2 py-0.5 ${statusBadge[page.processing_status] || 'bg-slate-100'}`}>
+              <div className="flex items-center gap-2 px-3 py-2 border-b bg-card">
+                <h3 className="font-display text-sm font-semibold">Page {page.page_number}</h3>
+                <span className={`text-[10px] rounded-full px-2 py-0.5 ${statusBadge[page.processing_status] || 'bg-muted'}`}>
                   {page.processing_status}
                 </span>
                 <div className="flex-1" />
-                <div className="flex text-xs rounded-md overflow-hidden border">
-                  <button className={`px-2 py-1 ${editMode === 'segments' ? 'bg-indigo-600 text-white' : ''}`}
-                          onClick={() => setEditMode('segments')}>Segments</button>
-                  <button className={`px-2 py-1 ${editMode === 'text' ? 'bg-indigo-600 text-white' : ''}`}
-                          onClick={() => { setEditMode('text'); setFullText(page.transcription?.edited_text || page.transcription?.raw_htr_text || '') }}>
-                    Texte
-                  </button>
-                </div>
+                <Tabs value={editMode}
+                      onValueChange={(v) => {
+                        setEditMode(v as 'segments' | 'text')
+                        if (v === 'text') {
+                          setFullText(page.transcription?.edited_text
+                            || page.transcription?.raw_htr_text || '')
+                        }
+                      }}>
+                  <TabsList>
+                    <TabsTrigger value="segments">Segments</TabsTrigger>
+                    <TabsTrigger value="text">Texte</TabsTrigger>
+                  </TabsList>
+                </Tabs>
               </div>
 
-              {page.error && <p className="text-sm text-red-600 px-3 py-2 bg-red-50">{page.error}</p>}
+              {page.error && (
+                <p className="text-sm text-destructive px-3 py-2 bg-destructive/10">{page.error}</p>
+              )}
 
               {editMode === 'segments' ? (
                 <div className="flex-1 overflow-y-auto thin-scroll p-3 space-y-2">
-                  {page.segments.length === 0 && <p className="text-sm text-slate-400">Aucun segment.</p>}
+                  {page.segments.length === 0 && (
+                    <p className="text-sm text-muted-foreground">Aucun segment.</p>
+                  )}
                   {page.segments.map((s) => (
                     <div key={s.id} id={`seg-${s.id}`}
                          className={`border rounded-md px-2 py-1.5 flex items-start gap-2 cursor-pointer transition
-                                     ${activeSegmentId === s.id ? 'ring-2 ring-indigo-400 ' : ''}${confColor(s.confidence)}`}
+                                     ${activeSegmentId === s.id ? 'ring-2 ring-primary/50 ' : ''}${confColor(s.confidence)}`}
                          onClick={() => setActiveSegmentId(s.id)}>
-                      <span className="text-[10px] text-slate-500 w-8 pt-2 text-right">{Math.round(s.confidence * 100)}%</span>
+                      <span className="text-[10px] text-muted-foreground w-8 pt-2 text-right">
+                        {Math.round(s.confidence * 100)}%
+                      </span>
                       <SegmentInput seg={s} onSave={saveSegment} />
-                      <button className={`text-[10px] pt-1 ${s.is_validated ? 'text-emerald-600' : 'text-slate-300'}`}
+                      <button className={`text-[10px] pt-1 ${s.is_validated ? 'text-success' : 'text-muted-foreground/40'}`}
                               title="Valider la ligne"
                               onClick={(e) => { e.stopPropagation(); saveSegment(s, s.edited_text || s.source_text, !s.is_validated) }}>✓</button>
                     </div>
@@ -472,44 +498,40 @@ export default function Station() {
                 </div>
               ) : (
                 <div className="flex-1 flex flex-col p-3 gap-2 min-h-0">
-                  <textarea className="flex-1 border rounded-lg p-3 font-mono text-sm resize-none thin-scroll"
+                  <textarea className="flex-1 bg-card border rounded-lg p-3 font-mono text-sm resize-none thin-scroll
+                                       outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                             value={fullText} onChange={(e) => setFullText(e.target.value)} />
-                  <button onClick={saveFullText}
-                          className="self-end bg-slate-800 text-white text-sm rounded-md px-3 py-1.5">
-                    Enregistrer le texte
-                  </button>
+                  <Button className="self-end" onClick={saveFullText}>Enregistrer le texte</Button>
                 </div>
               )}
 
-              <div className="border-t px-3 py-2 bg-white">
+              <div className="border-t px-3 py-2 bg-card">
                 <div className="flex items-center gap-2">
-                  <button onClick={aiSuggest} disabled={busy === 'ai'}
-                          className="text-xs bg-violet-600 text-white rounded-md px-3 py-1.5 disabled:opacity-50">
+                  <Button size="sm" onClick={aiSuggest} disabled={busy === 'ai'}>
                     {busy === 'ai' ? 'IA en cours…' : '✨ Correction IA'}
-                  </button>
-                  <button onClick={reocr} disabled={busy === 'reocr'}
-                          className="text-xs bg-slate-200 rounded-md px-3 py-1.5 disabled:opacity-50">
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={reocr} disabled={busy === 'reocr'}>
                     ↻ Ré-OCR
-                  </button>
+                  </Button>
                   <div className="flex-1" />
-                  <button onClick={validatePage}
-                          className="text-xs bg-emerald-600 text-white rounded-md px-3 py-1.5">
+                  <Button size="sm" variant="outline" onClick={validatePage}>
                     ✓ Valider la page (V)
-                  </button>
+                  </Button>
                 </div>
                 {page.suggestions.length > 0 && (
                   <div className="mt-2 space-y-2 max-h-40 overflow-y-auto thin-scroll">
                     {page.suggestions.map((s) => (
-                      <div key={s.id} className={`border rounded-md p-2 text-sm ${s.status === 'accepted' ? 'border-emerald-300 bg-emerald-50' : s.status === 'rejected' ? 'opacity-50 border-slate-200' : 'border-violet-200 bg-violet-50'}`}>
-                        <p><span className="line-through text-red-600">{s.original_text}</span>
-                           {' → '}<span className="text-emerald-700">{s.suggested_text}</span></p>
-                        {s.explanation && <p className="text-xs text-slate-500 mt-0.5">{s.explanation}</p>}
+                      <div key={s.id} className={`border rounded-md p-2 text-sm ${s.status === 'accepted' ? 'border-success/40 bg-success/8' : s.status === 'rejected' ? 'opacity-50' : 'border-primary/30 bg-primary/5'}`}>
+                        <p><span className="line-through text-destructive">{s.original_text}</span>
+                           {' → '}<span className="text-success">{s.suggested_text}</span></p>
+                        {s.explanation && (
+                          <p className="text-xs text-muted-foreground mt-0.5">{s.explanation}</p>
+                        )}
                         {s.status === 'pending' && (
-                          <div className="mt-1 flex gap-2 text-xs">
-                            <button className="text-emerald-700 font-medium"
-                                    onClick={() => decide(s.id, true)}>Appliquer</button>
-                            <button className="text-slate-500"
-                                    onClick={() => decide(s.id, false)}>Ignorer</button>
+                          <div className="mt-1 flex gap-2">
+                            <Button size="xs" onClick={() => decide(s.id, true)}>Appliquer</Button>
+                            <Button size="xs" variant="ghost"
+                                    onClick={() => decide(s.id, false)}>Ignorer</Button>
                           </div>
                         )}
                       </div>
@@ -519,7 +541,7 @@ export default function Station() {
               </div>
             </>
           ) : (
-            <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
+            <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
               Sélectionne une page (vignettes à gauche) pour l’éditer.
             </div>
           )}
@@ -527,7 +549,7 @@ export default function Station() {
       </main>
 
       {toast && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm rounded-lg px-4 py-2 shadow-lg">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-foreground text-background text-sm rounded-lg px-4 py-2 shadow-lg">
           {toast}
         </div>
       )}
@@ -687,29 +709,31 @@ function Viewer({ page, pages, onSelect, activeSegmentId, onSegmentPick, widthPc
 
   return (
     <section className="flex flex-col min-h-0 shrink-0" style={{ width: `${widthPct * 100}%` }}>
-      <div className="px-3 py-2 border-b bg-white flex items-center gap-2 shrink-0">
-        <h3 className="text-sm font-semibold text-slate-600">Image source</h3>
-        {page && <span className="text-[11px] text-slate-400">page {page.page_number}</span>}
+      <div className="px-3 py-2 border-b bg-card flex items-center gap-2 shrink-0">
+        <h3 className="font-display text-sm font-semibold">Image source</h3>
+        {page && <span className="text-[11px] text-muted-foreground">page {page.page_number}</span>}
       </div>
-      <div className="flex-1 relative bg-slate-800 min-h-0">
+      <div className="flex-1 relative osd-host min-h-0">
         <div ref={containerRef} className="absolute inset-0 osd-host" />
         {!imgSrc && (
-          <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm pointer-events-none">
+          <div className="absolute inset-0 flex items-center justify-center text-paper-2/60 text-sm pointer-events-none">
             {page ? (imageError ? 'Image indisponible' : 'Chargement…') : 'Aucune page sélectionnée'}
           </div>
         )}
-        <div className="absolute bottom-2 left-2 bg-black/50 text-white text-xs rounded px-2 py-1 pointer-events-none">
+        <div className="absolute bottom-2 left-2 bg-ink/60 text-paper text-xs rounded px-2 py-1 pointer-events-none">
           🔍 {zoomLabel}%
         </div>
       </div>
-      <div className="bg-white border-t shrink-0">
-        <div className="px-2 pt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Pages</div>
+      <div className="bg-card border-t shrink-0">
+        <div className="px-2 pt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Pages
+        </div>
         <div className="h-20 flex gap-2 p-2 pt-1 overflow-x-auto thin-scroll">
         {pages.map((p) => (
           <button key={p.id} onClick={() => onSelect(p.id)}
                   className={`min-w-14 h-full rounded border text-[10px] relative
-                              ${page?.id === p.id ? 'border-indigo-500 ring-1 ring-indigo-300' : 'border-slate-200'}`}>
-            <span className="absolute bottom-0 right-1 bg-slate-900/70 text-white rounded px-1">
+                              ${page?.id === p.id ? 'border-primary ring-1 ring-primary/40' : 'border-border'}`}>
+            <span className="absolute bottom-0 right-1 bg-ink/70 text-paper rounded px-1">
               {p.page_number}
             </span>
             <StatusDot status={p.processing_status} />
@@ -743,8 +767,8 @@ function bboxRect(bbox: any): [number, number, number, number] | null {
 
 function StatusDot({ status }: { status: string }) {
   const color: Record<string, string> = {
-    done: 'bg-emerald-500', error: 'bg-red-500', transcribing: 'bg-blue-500 animate-pulse',
-    queued: 'bg-amber-400', idle: 'bg-slate-300',
+    done: 'bg-success', error: 'bg-destructive', transcribing: 'bg-primary animate-pulse',
+    queued: 'bg-warning', idle: 'bg-border',
   }
-  return <span className={`absolute top-1 left-1 w-2 h-2 rounded-full ${color[status] || 'bg-slate-300'}`} />
+  return <span className={`absolute top-1 left-1 w-2 h-2 rounded-full ${color[status] || 'bg-border'}`} />
 }
