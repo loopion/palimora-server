@@ -175,3 +175,207 @@ def test_unknown_job_404_is_relayed(client, db, kstub):
 def test_catalog_routes_require_admin(client, db, kstub, method, path):
     u = make_user(db, email="u@test.fr")
     assert client.request(method, path, headers=auth_headers(db, u)).status_code == 403
+
+
+def test_pull_proxies_and_audits(client, db, kstub):
+    from app.models import AdminAuditLog
+    admin = _admin(db)
+    kstub.routes[("POST", "/models")] = (
+        202, {"job_id": "j-pull", "slug": "rec-1", "status": "started"})
+    r = client.post("/api/admin/ocr/models", json={"doi": "10.5281/zenodo.1"},
+                    headers=auth_headers(db, admin))
+    assert r.status_code == 202
+    assert r.json() == {"job_id": "j-pull", "slug": "rec-1", "status": "started"}
+    proxied = [c for c in kstub.calls if c["path"] == "/models" and c["method"] == "POST"][0]
+    assert proxied["json"] == {"doi": "10.5281/zenodo.1"}
+    db.expire_all()
+    row = db.query(AdminAuditLog).filter_by(event="ocr.model_pull").one()
+    assert row.actor_user_id == admin.id
+    assert row.path == "/api/admin/ocr/models"
+    assert row.status_code == 202
+
+
+def test_pull_relays_a_409_and_writes_no_audit(client, db, kstub):
+    from app.models import AdminAuditLog
+    admin = _admin(db)
+    kstub.routes[("POST", "/models")] = (409, {"detail": "Modèle déjà présent"})
+    r = client.post("/api/admin/ocr/models", json={"doi": "10.5281/zenodo.1"},
+                    headers=auth_headers(db, admin))
+    assert r.status_code == 409
+    assert r.json()["detail"] == "Modèle déjà présent"
+    db.expire_all()
+    assert db.query(AdminAuditLog).filter_by(event="ocr.model_pull").count() == 0
+
+
+def test_pull_relays_a_400(client, db, kstub):
+    admin = _admin(db)
+    kstub.routes[("POST", "/models")] = (400, {"detail": "DOI Zenodo invalide"})
+    r = client.post("/api/admin/ocr/models", json={"doi": "nope"},
+                    headers=auth_headers(db, admin))
+    assert r.status_code == 400
+    assert r.json()["detail"] == "DOI Zenodo invalide"
+
+
+def test_finished_pull_job_writes_a_completion_audit_and_busts_the_cache(client, db, kstub):
+    from app.models import AdminAuditLog
+    admin = _admin(db)
+    kstub.routes[("GET", "/models/jobs/j-ok")] = (200, {
+        "kind": "pull", "job_id": "j-ok", "status": "finished",
+        "doi": "10.5281/zenodo.1", "slug": "rec-1", "error": None, "progress": 100})
+    ocr_models.list_models()  # warm the cache
+    r = client.get("/api/admin/ocr/models/jobs/j-ok", headers=auth_headers(db, admin))
+    assert r.status_code == 200 and r.json()["status"] == "finished"
+    assert ocr_models._CACHE["models"] is None
+    db.expire_all()
+    row = db.query(AdminAuditLog).filter_by(event="ocr.model_pull_done").one()
+    assert row.actor_user_id == admin.id
+    assert row.path == "/api/admin/ocr/models/jobs/j-ok"
+    assert row.status_code == 200
+
+
+def test_failed_pull_job_writes_a_500_completion_audit(client, db, kstub):
+    from app.models import AdminAuditLog
+    admin = _admin(db)
+    kstub.routes[("GET", "/models/jobs/j-bad")] = (200, {
+        "kind": "pull", "job_id": "j-bad", "status": "failed",
+        "doi": "10.5281/zenodo.1", "slug": "rec-1",
+        "error": "pas un modèle de reconnaissance", "progress": 0})
+    r = client.get("/api/admin/ocr/models/jobs/j-bad", headers=auth_headers(db, admin))
+    assert r.status_code == 200
+    db.expire_all()
+    row = db.query(AdminAuditLog).filter_by(event="ocr.model_pull_done").one()
+    assert row.status_code == 500
+    assert row.path == "/api/admin/ocr/models/jobs/j-bad"
+
+
+def test_completion_audit_is_written_once_per_job(client, db, kstub):
+    from app.models import AdminAuditLog
+    admin = _admin(db)
+    kstub.routes[("GET", "/models/jobs/j-ok")] = (200, {
+        "kind": "pull", "job_id": "j-ok", "status": "finished",
+        "doi": "10.5281/zenodo.1", "slug": "rec-1", "error": None, "progress": 100})
+    for _ in range(3):
+        client.get("/api/admin/ocr/models/jobs/j-ok", headers=auth_headers(db, admin))
+    db.expire_all()
+    assert db.query(AdminAuditLog).filter_by(event="ocr.model_pull_done").count() == 1
+
+
+def test_a_running_pull_job_writes_no_completion_audit(client, db, kstub):
+    from app.models import AdminAuditLog
+    admin = _admin(db)
+    kstub.routes[("GET", "/models/jobs/j-run")] = (200, {
+        "kind": "pull", "job_id": "j-run", "status": "started",
+        "doi": "10.5281/zenodo.1", "slug": "rec-1", "error": None, "progress": 42})
+    ocr_models.list_models()
+    client.get("/api/admin/ocr/models/jobs/j-run", headers=auth_headers(db, admin))
+    db.expire_all()
+    assert db.query(AdminAuditLog).filter_by(event="ocr.model_pull_done").count() == 0
+    assert ocr_models._CACHE["models"] is not None  # cache untouched mid-pull
+
+
+def test_a_refresh_job_writes_no_pull_audit(client, db, kstub):
+    from app.models import AdminAuditLog
+    admin = _admin(db)
+    kstub.routes[("GET", "/models/jobs/j-ref")] = (200, {
+        "kind": "refresh", "job_id": "j-ref", "status": "finished",
+        "error": None, "count": 12})
+    client.get("/api/admin/ocr/models/jobs/j-ref", headers=auth_headers(db, admin))
+    db.expire_all()
+    assert db.query(AdminAuditLog).filter_by(event="ocr.model_pull_done").count() == 0
+
+
+def test_delete_refuses_the_active_model_without_calling_kraken(client, db, kstub):
+    admin = _admin(db)
+    db.add(AppSetting(key="ocr_model", value="rec-21788409"))
+    db.commit()
+    r = client.delete("/api/admin/ocr/models/rec-21788409",
+                      headers=auth_headers(db, admin))
+    assert r.status_code == 409
+    assert "actif" in r.json()["detail"].lower()
+    assert ("DELETE", "/models/rec-21788409") not in {
+        (c["method"], c["path"]) for c in kstub.calls}
+
+
+def test_delete_proxies_audits_and_busts_the_cache(client, db, kstub):
+    from app.models import AdminAuditLog
+    admin = _admin(db)
+    kstub.routes[("DELETE", "/models/rec-21788409")] = (200, {"deleted": "rec-21788409"})
+    ocr_models.list_models()  # warm the cache
+    r = client.delete("/api/admin/ocr/models/rec-21788409",
+                      headers=auth_headers(db, admin))
+    assert r.status_code == 200
+    assert r.json() == {"deleted": "rec-21788409"}
+    assert ocr_models._CACHE["models"] is None
+    db.expire_all()
+    row = db.query(AdminAuditLog).filter_by(event="ocr.model_delete").one()
+    assert row.path == "/api/admin/ocr/models/rec-21788409"
+    assert row.status_code == 200
+
+
+def test_delete_relays_krakens_protected_409(client, db, kstub):
+    admin = _admin(db)
+    kstub.routes[("DELETE", "/models/rec")] = (409, {"detail": "Modèle protégé"})
+    db.add(AppSetting(key="ocr_model", value="rec-21788409"))
+    db.commit()
+    r = client.delete("/api/admin/ocr/models/rec", headers=auth_headers(db, admin))
+    assert r.status_code == 409
+    assert r.json()["detail"] == "Modèle protégé"
+
+
+def test_delete_relays_a_404(client, db, kstub):
+    admin = _admin(db)
+    kstub.routes[("DELETE", "/models/rec-404")] = (404, {"detail": "Modèle introuvable"})
+    r = client.delete("/api/admin/ocr/models/rec-404", headers=auth_headers(db, admin))
+    assert r.status_code == 404
+
+
+def test_put_model_accepts_a_live_slug(client, db, kstub):
+    admin = _admin(db)
+    r = client.put("/api/admin/ocr/model", json={"key": "rec-21788409"},
+                   headers=auth_headers(db, admin))
+    assert r.status_code == 200
+    assert r.json() == {"active_key": "rec-21788409"}
+    db.expire_all()
+    assert db.query(AppSetting).filter_by(key="ocr_model").one().value == "rec-21788409"
+
+
+def test_put_model_rejects_an_unknown_slug(client, db, kstub):
+    admin = _admin(db)
+    r = client.put("/api/admin/ocr/model", json={"key": "rec-bogus"},
+                   headers=auth_headers(db, admin))
+    assert r.status_code == 400
+    assert "rec-bogus" in r.json()["detail"]
+
+
+def test_put_model_502_when_kraken_is_down(client, db, kstub):
+    admin = _admin(db)
+    kstub.routes[("GET", "/models")] = kraken.KrakenError("down")
+    r = client.put("/api/admin/ocr/model", json={"key": "rec-21788409"},
+                   headers=auth_headers(db, admin))
+    assert r.status_code == 502
+
+
+@pytest.mark.parametrize("method,path,body", [
+    ("POST", "/api/admin/ocr/models", {"doi": "10.5281/zenodo.1"}),
+    ("DELETE", "/api/admin/ocr/models/rec-1", None),
+    ("PUT", "/api/admin/ocr/model", {"key": "rec"}),
+])
+def test_write_routes_require_admin(client, db, kstub, method, path, body):
+    u = make_user(db, email="u@test.fr")
+    r = client.request(method, path, json=body, headers=auth_headers(db, u))
+    assert r.status_code == 403
+
+
+@pytest.mark.parametrize("method,path,body", [
+    ("GET", "/api/admin/ocr", None),
+    ("GET", "/api/admin/ocr/catalog", None),
+    ("POST", "/api/admin/ocr/catalog/refresh", None),
+    ("POST", "/api/admin/ocr/models", {"doi": "10.5281/zenodo.1"}),
+    ("DELETE", "/api/admin/ocr/models/rec-1", None),
+    ("PUT", "/api/admin/ocr/model", {"key": "rec"}),
+])
+def test_every_ocr_route_403_during_impersonation(client, db, kstub, method, path, body):
+    admin = _admin(db)
+    target = make_user(db, email="t@test.fr")
+    headers = {**auth_headers(db, admin), "X-Impersonate": target.id}
+    assert client.request(method, path, json=body, headers=headers).status_code == 403
