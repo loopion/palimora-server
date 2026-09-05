@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, setImpersonation, setToken } from '../api'
-import type { OcrPanelData } from '../api'
+import type { CatalogResponse, LocalModel, ModelJob, OcrPanelData } from '../api'
 import Mark from '../components/Mark'
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -24,6 +28,29 @@ interface AuditRow {
   actor_email: string | null; target_email: string | null
 }
 
+const SCRIPTS = ['Latn', 'Grek', 'Arab', 'Hebr', 'Cyrl', 'Syrc', 'Deva']
+const JOB_POLL_MS = 3000
+// Native <select> on purpose (as in E2): the Radix Select renders its listbox in
+// a portal, which the panel's tests drive with selectOptions/toHaveValue.
+const selectClass =
+  'h-8 rounded-lg border border-input bg-card px-2 text-sm outline-none ' +
+  'focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'
+
+function formatBytes(n: number): string {
+  if (!n) return '—'
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} Ko`
+  return `${(n / (1024 * 1024)).toFixed(1)} Mo`
+}
+
+async function pollJob(jobId: string, onTick: (j: ModelJob) => void): Promise<ModelJob> {
+  for (;;) {
+    const job = await api.get<ModelJob>(`/api/admin/ocr/models/jobs/${jobId}`)
+    onTick(job)
+    if (job.status === 'finished' || job.status === 'failed') return job
+    await new Promise((r) => setTimeout(r, JOB_POLL_MS))
+  }
+}
+
 export default function Admin() {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
@@ -34,6 +61,15 @@ export default function Admin() {
   const [modelKey, setModelKey] = useState('')
   const [savingModel, setSavingModel] = useState(false)
   const [impersonating, setImpersonating] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<LocalModel | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [catalogOpen, setCatalogOpen] = useState(false)
+  const [catalog, setCatalog] = useState<CatalogResponse | null>(null)
+  const [catalogScript, setCatalogScript] = useState('Latn')
+  const [catalogAll, setCatalogAll] = useState(false)
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [refreshingCatalog, setRefreshingCatalog] = useState(false)
+  const [pullJobs, setPullJobs] = useState<Record<string, ModelJob>>({})
   const navigate = useNavigate()
 
   const refresh = useCallback(async () => {
@@ -48,7 +84,7 @@ export default function Admin() {
     // OCR panel is non-critical: fetch it independently so its failure
     // (500 / timeout) degrades gracefully instead of blanking the console.
     api.get<OcrPanelData>('/api/admin/ocr')
-      .then((o) => { setOcr(o); setModelKey(o.active_key) })
+      .then((o) => { setOcr(o); setModelKey(o.active_slug) })
       .catch(() => setOcr(null))
   }, [])
 
@@ -83,21 +119,99 @@ export default function Admin() {
     }
   }
 
-  // '' when the active model isn't one of the configurable keys (fallback):
-  // don't pretend the first listed model is selected.
+  const say = useCallback((msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(''), 3500)
+  }, [])
+
+  const loadCatalog = useCallback(async (script: string, all: boolean) => {
+    setCatalogLoading(true)
+    try {
+      const params = new URLSearchParams({ script, all: all ? 'true' : 'false' })
+      setCatalog(await api.get<CatalogResponse>(`/api/admin/ocr/catalog?${params}`))
+    } catch (e: any) {
+      setCatalog(null)
+      say(e?.message || 'Catalogue indisponible')
+    } finally {
+      setCatalogLoading(false)
+    }
+  }, [say])
+
+  function toggleCatalog() {
+    const next = !catalogOpen
+    setCatalogOpen(next)
+    if (next && catalog === null) loadCatalog(catalogScript, catalogAll)
+  }
+
+  function changeScript(value: string) {
+    const all = value === 'all'
+    const script = all ? catalogScript : value
+    setCatalogAll(all)
+    if (!all) setCatalogScript(value)
+    loadCatalog(script, all)
+  }
+
+  async function refreshCatalog() {
+    setRefreshingCatalog(true)
+    try {
+      const { job_id } = await api.post<{ job_id: string }>('/api/admin/ocr/catalog/refresh')
+      const job = await pollJob(job_id, () => {})
+      if (job.status === 'failed') say(job.error || 'Rafraîchissement en échec')
+      else { say('Catalogue rafraîchi'); await loadCatalog(catalogScript, catalogAll) }
+    } catch (e: any) {
+      say(e?.message || 'Rafraîchissement impossible')
+    } finally {
+      setRefreshingCatalog(false)
+    }
+  }
+
+  async function pullModel(doi: string) {
+    try {
+      const started = await api.post<{ job_id: string }>('/api/admin/ocr/models', { doi })
+      const job = await pollJob(started.job_id, (j) => setPullJobs((p) => ({ ...p, [doi]: j })))
+      if (job.status === 'failed') {
+        say(job.error || 'Téléchargement en échec')
+      } else {
+        say('Modèle téléchargé')
+        await loadCatalog(catalogScript, catalogAll)
+        refresh()
+      }
+    } catch (e: any) {
+      say(e?.message || 'Téléchargement impossible')
+    } finally {
+      setPullJobs((p) => { const { [doi]: _drop, ...rest } = p; return rest })
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      await api.delete(`/api/admin/ocr/models/${deleteTarget.slug}`)
+      say('Modèle supprimé')
+      setDeleteTarget(null)
+      refresh()
+    } catch (e: any) {
+      say(e?.message || 'Suppression impossible')
+      setDeleteTarget(null)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  // '' when the stored slug is no longer in the live list: don't pretend the
+  // first listed model is selected.
   const effectiveKey =
-    ocr && ocr.models.some((m) => m.key === modelKey) ? modelKey : ''
+    ocr && ocr.local_models.some((m) => m.slug === modelKey) ? modelKey : ''
 
   async function saveModel() {
     setSavingModel(true)
     try {
       await api.put('/api/admin/ocr/model', { key: effectiveKey })
-      setToast('Modèle OCR mis à jour')
-      setTimeout(() => setToast(''), 2500)
+      say('Modèle OCR mis à jour')
       refresh()
-    } catch {
-      setToast('Erreur mise à jour modèle')
-      setTimeout(() => setToast(''), 2500)
+    } catch (e: any) {
+      say(e?.message || 'Erreur mise à jour modèle')
     } finally {
       setSavingModel(false)
     }
@@ -219,56 +333,170 @@ export default function Admin() {
       </div>
 
       {ocr && (
-        <div className="px-4 pb-12">
-          <h2 className="mb-2 font-display font-semibold">OCR / Modèles</h2>
+        <div className="px-4 pb-12 space-y-6">
+          <h2 className="font-display font-semibold">OCR / Modèles</h2>
 
-          {ocr.models.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Aucun modèle alternatif configuré (env <code>KRAKEN_MODELS</code>).
-            </p>
-          ) : (
-            <div className="mb-4 flex items-center gap-2 text-sm">
-              {/* Native select on purpose: the shadcn/Radix Select renders a
-                  listbox in a portal, which the OCR panel's tests drive with
-                  selectOptions/toHaveValue. */}
-              <select
-                className="h-8 rounded-lg border border-input bg-card px-2 text-sm
-                           outline-none focus-visible:border-ring focus-visible:ring-3
-                           focus-visible:ring-ring/50"
-                value={effectiveKey} onChange={(e) => setModelKey(e.target.value)}>
-                {effectiveKey === '' && <option value="" disabled>— défaut Kraken —</option>}
-                {ocr.models.map((m) => <option key={m.key} value={m.key}>{m.key}</option>)}
-              </select>
-              <Button disabled={savingModel || effectiveKey === ''} onClick={saveModel}>
-                Enregistrer
-              </Button>
-              <span className="text-xs text-muted-foreground">source&nbsp;: {ocr.active_source}</span>
-            </div>
+          {ocr.kraken_error && (
+            <Alert variant="destructive">
+              <AlertTitle>Service Kraken injoignable</AlertTitle>
+              <AlertDescription>
+                Gestion des modèles indisponible. Les statistiques ci-dessous
+                proviennent de la base et restent à jour.
+              </AlertDescription>
+            </Alert>
           )}
 
-          <div className="bg-card rounded-lg border overflow-hidden mb-6">
-            <Table>
-              <TableHeader><TableRow>
-                <TableHead>Modèle</TableHead><TableHead>Pages</TableHead>
-                <TableHead>Erreurs</TableHead>
-                <TableHead>Médiane (s)</TableHead><TableHead>p95 (s)</TableHead>
-                <TableHead>Confiance moy.</TableHead>
-              </TableRow></TableHeader>
-              <TableBody>
-                {ocr.aggregates.map((a) => (
-                  <TableRow key={a.model_key || '—'}>
-                    <TableCell>{a.model_key || '—'}</TableCell>
-                    <TableCell>{a.pages}</TableCell>
-                    <TableCell>{a.errors}</TableCell>
-                    <TableCell>{a.median_s ?? '—'}</TableCell>
-                    <TableCell>{a.p95_s ?? '—'}</TableCell>
-                    <TableCell>{a.avg_confidence ?? '—'}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          {/* ── Block 1 — Modèle actif & performance ───────────────────── */}
+          <section className="space-y-3">
+            <h3 className="font-display text-sm font-semibold">Modèle actif</h3>
+            {ocr.local_models.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Aucun modèle local — Kraken indisponible ou volume vide.
+              </p>
+            ) : (
+              <div className="flex items-center gap-2 text-sm">
+                <label className="sr-only" htmlFor="active-model">Modèle actif</label>
+                <select id="active-model" aria-label="Modèle actif" className={selectClass}
+                        value={effectiveKey} onChange={(e) => setModelKey(e.target.value)}>
+                  {effectiveKey === '' && (
+                    <option value="" disabled>— rec (défaut Kraken) —</option>
+                  )}
+                  {ocr.local_models.map((m) => (
+                    <option key={m.slug} value={m.slug}>
+                      {m.summary ? `${m.slug} — ${m.summary}` : m.slug}
+                    </option>
+                  ))}
+                </select>
+                <Button disabled={savingModel || effectiveKey === '' || effectiveKey === ocr.active_slug}
+                        onClick={saveModel}>
+                  Activer
+                </Button>
+                <Badge variant="outline">source&nbsp;: {ocr.active_source}</Badge>
+              </div>
+            )}
 
+            <div className="bg-card rounded-lg border overflow-hidden">
+              <Table>
+                <TableHeader><TableRow>
+                  <TableHead>Modèle</TableHead><TableHead>Pages</TableHead>
+                  <TableHead>Erreurs</TableHead>
+                  <TableHead>Médiane (s)</TableHead><TableHead>p95 (s)</TableHead>
+                  <TableHead>Confiance moy.</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {ocr.aggregates.map((a) => (
+                    <TableRow key={a.model_key || '—'}>
+                      <TableCell>{a.model_key || '—'}</TableCell>
+                      <TableCell>{a.pages}</TableCell>
+                      <TableCell>{a.errors}</TableCell>
+                      <TableCell>{a.median_s ?? '—'}</TableCell>
+                      <TableCell>{a.p95_s ?? '—'}</TableCell>
+                      <TableCell>{a.avg_confidence ?? '—'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </section>
+
+          {/* ── Block 2 — Modèles téléchargés ──────────────────────────── */}
+          <section className="space-y-2">
+            <h3 className="font-display text-sm font-semibold">Modèles téléchargés</h3>
+            <div className="bg-card rounded-lg border overflow-hidden">
+              <Table>
+                <TableHeader><TableRow>
+                  <TableHead>Slug</TableHead><TableHead>DOI</TableHead>
+                  <TableHead>Écriture</TableHead><TableHead>Taille</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {ocr.local_models.map((m) => (
+                    <TableRow key={m.slug} data-testid={`local-model-${m.slug}`}>
+                      <TableCell className="font-mono text-xs">{m.slug}</TableCell>
+                      <TableCell className="font-mono text-xs">{m.doi || '—'}</TableCell>
+                      <TableCell>{m.script || '—'}</TableCell>
+                      <TableCell>{formatBytes(m.size_bytes)}</TableCell>
+                      <TableCell>
+                        <Button size="xs" variant="destructive"
+                                disabled={m.protected || m.slug === ocr.active_slug}
+                                onClick={() => setDeleteTarget(m)}>
+                          Supprimer
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </section>
+
+          {/* ── Block 3 — Catalogue HTRMoPo (lazy) ─────────────────────── */}
+          <section className="space-y-2">
+            <Button variant="ghost" size="sm" onClick={toggleCatalog}
+                    aria-expanded={catalogOpen}>
+              {catalogOpen ? '▾' : '▸'} Catalogue HTRMoPo
+            </Button>
+
+            {catalogOpen && (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <label className="sr-only" htmlFor="catalog-script">Écriture</label>
+                  <select id="catalog-script" aria-label="Écriture" className={selectClass}
+                          value={catalogAll ? 'all' : catalogScript}
+                          onChange={(e) => changeScript(e.target.value)}>
+                    {SCRIPTS.map((s) => <option key={s} value={s}>{s}</option>)}
+                    <option value="all">tous</option>
+                  </select>
+                  <Button size="sm" variant="outline" disabled={refreshingCatalog}
+                          onClick={refreshCatalog}>
+                    {refreshingCatalog ? 'Rafraîchissement…' : 'Rafraîchir'}
+                  </Button>
+                  {catalog?.cached_at && (
+                    <span className="text-xs text-muted-foreground">
+                      cache&nbsp;: {new Date(catalog.cached_at).toLocaleString('fr-FR')}
+                    </span>
+                  )}
+                  {catalog?.stale && <Badge variant="outline">obsolète</Badge>}
+                  {catalog?.refreshing && <Badge variant="outline">en cours…</Badge>}
+                </div>
+
+                {catalogLoading && (
+                  <p className="text-sm text-muted-foreground">Chargement du catalogue…</p>
+                )}
+
+                <div className="grid gap-2 md:grid-cols-2">
+                  {(catalog?.models || []).map((m) => {
+                    const job = pullJobs[m.doi]
+                    return (
+                      <div key={m.doi} data-testid={`catalog-${m.doi}`}
+                           className="bg-card rounded-lg border p-3 space-y-1.5">
+                        <p className="text-sm font-medium">{m.summary || m.doi}</p>
+                        <p className="font-mono text-xs text-muted-foreground">{m.doi}</p>
+                        <div className="flex flex-wrap gap-1">
+                          {m.script && <Badge variant="outline">{m.script}</Badge>}
+                          {m.keywords.map((k) => <Badge key={k} variant="outline">{k}</Badge>)}
+                          {m.license && <Badge variant="outline">{m.license}</Badge>}
+                        </div>
+                        {job && (
+                          <div className="h-1.5 w-full rounded bg-muted overflow-hidden">
+                            <div className="h-full bg-primary transition-all"
+                                 style={{ width: `${job.progress ?? 0}%` }} />
+                          </div>
+                        )}
+                        <Button size="xs" disabled={m.already_local || Boolean(job)}
+                                onClick={() => pullModel(m.doi)}>
+                          {m.already_local ? 'Déjà local'
+                            : job ? 'Téléchargement…' : 'Télécharger'}
+                        </Button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* ── E2 recent-pages table (unchanged) ──────────────────────── */}
           <div className="bg-card rounded-lg border overflow-hidden">
             <Table>
               <TableHeader><TableRow>
@@ -296,6 +524,25 @@ export default function Admin() {
           </div>
         </div>
       )}
+
+      <Dialog open={deleteTarget !== null}
+              onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Supprimer le modèle</DialogTitle>
+            <DialogDescription>
+              <span className="font-mono">{deleteTarget?.slug}</span> sera supprimé
+              du volume Kraken. Les pages déjà transcrites ne changent pas.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>Annuler</Button>
+            <Button variant="destructive" disabled={deleting} onClick={confirmDelete}>
+              Confirmer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {toast && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-foreground text-background
