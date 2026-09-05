@@ -1077,10 +1077,35 @@ def _percentiles(durations: list[float]):
     return rank(0.5), rank(0.95)
 
 
+def _kraken_proxy(method: str, path: str, **kw) -> dict:
+    """Relay one call to the Kraken model-management API. Transport failure or a
+    5xx → 502; a 4xx is relayed with Kraken's own status + detail."""
+    try:
+        resp = kraken.call(method, path, **kw)
+    except kraken.KrakenError:
+        raise HTTPException(status_code=502, detail="Service Kraken injoignable")
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {"detail": resp.text[:300]}
+    if resp.status_code >= 400:
+        detail = body.get("detail") if isinstance(body, dict) else None
+        raise HTTPException(status_code=resp.status_code,
+                            detail=detail or f"Kraken a répondu {resp.status_code}")
+    return body
+
+
 @app.get("/api/admin/ocr")
 def admin_ocr(db: Session = Depends(get_db), admin: User = Depends(get_admin_user)):
     from datetime import timedelta
 
+    try:
+        local_models = ocr_models.list_models()
+        kraken_error = None
+    except kraken.KrakenError:
+        local_models = []
+        kraken_error = "Service Kraken injoignable"
+    # Both read the (now warm or empty) 60 s cache — no second round trip.
     active = ocr_models.resolve_active(db)
     recent_rows = (
         db.query(Page, Document.title)
@@ -1168,9 +1193,11 @@ def admin_ocr(db: Session = Depends(get_db), admin: User = Depends(get_admin_use
         })
 
     return {
-        "models": ocr_models.list_models(),
+        "local_models": local_models,
         "active_key": active["key"],
+        "active_slug": ocr_models.active_slug(db),
         "active_source": ocr_models.active_source(db),
+        "kraken_error": kraken_error,
         "recent": recent,
         "aggregates": aggregates,
     }
