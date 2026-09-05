@@ -1,4 +1,6 @@
 import { api, getImpersonation, setImpersonation } from '../api'
+import { Alert, AlertAction, AlertDescription } from './ui/alert'
+import { Button } from './ui/button'
 
 export default function ImpersonationBanner() {
   const target = getImpersonation()
@@ -17,16 +19,15 @@ export default function ImpersonationBanner() {
   }
 
   return (
-    <div
-      role="status"
-      className="sticky top-0 z-50 flex items-center gap-3 bg-amber-500 px-4 py-2 text-sm text-white"
-    >
-      <span>
-        Vous agissez en tant que <strong>{email}</strong>
-      </span>
-      <button onClick={stop} className="ml-auto rounded bg-white/20 px-2 py-1 font-medium">
-        Arrêter
-      </button>
+    <div className="sticky top-0 z-50 px-3 pt-2">
+      <Alert className="border-primary/40 bg-primary/10">
+        <AlertDescription className="text-foreground">
+          Vous agissez en tant que <strong className="font-semibold">{email}</strong>
+        </AlertDescription>
+        <AlertAction>
+          <Button size="xs" variant="outline" onClick={stop}>Arrêter</Button>
+        </AlertAction>
+      </Alert>
     </div>
   )
 }

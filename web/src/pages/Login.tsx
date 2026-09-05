@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, setToken } from '../api'
+import Mark from '../components/Mark'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -27,21 +30,27 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <form onSubmit={submit} className="bg-white rounded-xl shadow p-8 w-full max-w-sm space-y-4">
-        <h1 className="text-2xl font-semibold text-center">📜 Palimora</h1>
-        <p className="text-sm text-slate-500 text-center">Station de transcription</p>
-        <input className="w-full border rounded-lg px-3 py-2" type="email" placeholder="Email"
-               value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <input className="w-full border rounded-lg px-3 py-2" type="password" placeholder="Mot de passe"
-               value={password} onChange={(e) => setPassword(e.target.value)} required />
-        {error && <p className="text-red-600 text-sm">{error}</p>}
-        <button disabled={busy}
-                className="w-full bg-indigo-600 text-white rounded-lg py-2 font-medium disabled:opacity-50">
+    <div className="min-h-screen flex items-center justify-center p-6">
+      <form onSubmit={submit}
+            className="bg-card border rounded-xl shadow-sm p-8 w-full max-w-sm space-y-4">
+        <div className="flex flex-col items-center gap-2">
+          <Mark size={40} />
+          <h1 className="font-display text-2xl font-semibold">Palimora</h1>
+          <p className="text-sm text-muted-foreground">Station de transcription</p>
+        </div>
+        <Input type="email" placeholder="Email" required
+               value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Input type="password" placeholder="Mot de passe" required
+               value={password} onChange={(e) => setPassword(e.target.value)} />
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <Button type="submit" size="lg" className="w-full" disabled={busy}>
           {busy ? 'Connexion…' : 'Se connecter'}
-        </button>
-        <p className="text-sm text-center text-slate-500">
-          Pas de compte ? <Link className="text-indigo-600" to="/register">Créer un compte</Link>
+        </Button>
+        <p className="text-sm text-center text-muted-foreground">
+          Pas de compte ?{' '}
+          <Link className="text-primary underline-offset-4 hover:underline" to="/register">
+            Créer un compte
+          </Link>
         </p>
       </form>
     </div>

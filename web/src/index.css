@@ -1,21 +1,117 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import '@fontsource/fraunces/400.css';
+@import '@fontsource/fraunces/600.css';
+@import '@fontsource/public-sans/400.css';
+@import '@fontsource/public-sans/600.css';
+@import './styles/tokens.css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* Charte "warm parchment" → shadcn semantic tokens. tokens.css stays the single
+   source of truth so the Station and the public site cannot drift apart. */
+:root {
+  --background: var(--color-paper-2);
+  --foreground: var(--color-ink);
+  --card: var(--color-paper);
+  --card-foreground: var(--color-ink);
+  --popover: var(--color-paper);
+  --popover-foreground: var(--color-ink);
+  --primary: var(--color-accent);
+  --primary-foreground: var(--color-accent-ink);
+  --secondary: var(--color-paper-2);
+  --secondary-foreground: var(--color-ink);
+  --muted: var(--color-paper-2);
+  --muted-foreground: var(--color-ink-soft);
+  /* Name collision to know about: shadcn's "accent" is a subtle hover surface,
+     while the charte's --color-accent is the madder red. Reach for `bg-primary`
+     to get the brand colour; `bg-accent` resolves to the charte red, not this. */
+  --accent: var(--color-paper-2);
+  --accent-foreground: var(--color-ink);
+  --destructive: oklch(52% 0.19 27);
+  /* Status encodings (OCR confidence, page state) — hue-tuned to sit inside the
+     warm palette rather than Tailwind's default cool green/amber. */
+  --success: oklch(52% 0.11 150);
+  --warning: oklch(60% 0.12 75);
+  --border: var(--color-border);
+  --input: var(--color-border);
+  --ring: var(--color-focus);
+  --radius: 0.625rem;
+}
+
+@theme inline {
+  --font-sans: var(--font-body);
+  --font-heading: var(--font-display);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+
+  --color-paper: var(--color-paper);
+  --color-paper-2: var(--color-paper-2);
+  --color-ink: var(--color-ink);
+  --color-ink-soft: var(--color-ink-soft);
+  --color-accent-ink: var(--color-accent-ink);
+
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  h1, h2, h3 {
+    font-family: var(--font-display);
+  }
+}
 
 html, body, #root { height: 100%; }
-body { @apply bg-slate-100 text-slate-900; font-family: system-ui, -apple-system, sans-serif; }
 
 /* thin scrollbars inside panels */
 .thin-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
-.thin-scroll::-webkit-scrollbar-thumb { @apply bg-slate-300 rounded; }
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+}
 
 /* OpenSeadragon segment overlays */
 .seg-overlay {
-  border: 1.5px solid rgba(99, 102, 241, 0.55);
-  background: rgba(99, 102, 241, 0.08);
+  border: 1.5px solid color-mix(in oklab, var(--color-ink) 45%, transparent);
+  background: color-mix(in oklab, var(--color-ink) 6%, transparent);
   pointer-events: none;
 }
 .seg-overlay.seg-active {
-  border: 2px solid rgba(217, 70, 239, 0.9);
-  background: rgba(217, 70, 239, 0.15);
-  box-shadow: 0 0 0 2px rgba(255,255,255,0.35);
+  border: 2px solid var(--color-accent);
+  background: color-mix(in oklab, var(--color-accent) 15%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--color-paper) 60%, transparent);
 }
-.osd-host { background: #1e293b; }
+.osd-host { background: oklch(28% 0.015 60); }

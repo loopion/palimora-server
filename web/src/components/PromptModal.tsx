@@ -1,4 +1,9 @@
 import { useCallback, useRef, useState } from 'react'
+import { Button } from './ui/button'
+import {
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+} from './ui/dialog'
+import { Input } from './ui/input'
 
 interface PromptOpts {
   title: string
@@ -25,25 +30,25 @@ export function usePrompt() {
   }
 
   const node = opts ? (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40"
-         onMouseDown={() => close(null)}>
-      <div className="bg-white rounded-lg shadow-xl w-80 p-4" onMouseDown={(e) => e.stopPropagation()}>
-        <h2 className="text-sm font-semibold mb-2">{opts.title}</h2>
-        {opts.label && <label className="text-xs text-slate-500">{opts.label}</label>}
-        <input autoFocus className="w-full border rounded-md px-2 py-1.5 text-sm mt-1"
-               placeholder={opts.placeholder}
-               value={value} onChange={(e) => setValue(e.target.value)}
-               onKeyDown={(e) => {
-                 if (e.key === 'Enter') close(value)
-                 if (e.key === 'Escape') close(null)
-               }} />
-        <div className="flex justify-end gap-2 mt-3 text-sm">
-          <button className="px-3 py-1 text-slate-500" onClick={() => close(null)}>Annuler</button>
-          <button className="px-3 py-1 bg-indigo-600 text-white rounded-md"
-                  onClick={() => close(value)}>Valider</button>
-        </div>
-      </div>
-    </div>
+    <Dialog open onOpenChange={(open) => { if (!open) close(null) }}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="font-display">{opts.title}</DialogTitle>
+        </DialogHeader>
+        {opts.label && <label className="text-xs text-muted-foreground">{opts.label}</label>}
+        <Input
+          autoFocus
+          placeholder={opts.placeholder}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') close(value) }}
+        />
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => close(null)}>Annuler</Button>
+          <Button onClick={() => close(value)}>Valider</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   ) : null
 
   return { prompt, node }

@@ -2,6 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, setImpersonation, setToken } from '../api'
 import type { OcrPanelData } from '../api'
+import Mark from '../components/Mark'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '../components/ui/table'
 
 interface AdminUser {
   id: string; email: string; display_name: string
@@ -103,173 +110,196 @@ export default function Admin() {
 
   return (
     <div className="min-h-screen">
-      <header className="bg-white border-b px-4 py-2 flex items-center gap-3">
-        <Link to="/" className="text-sm text-indigo-600">← Station</Link>
-        <h1 className="font-semibold">Administration</h1>
+      <header className="bg-card border-b px-4 py-2.5 flex items-center gap-3">
+        <Link to="/" className="flex items-center gap-2">
+          <Mark size={24} />
+          <span className="font-display font-semibold">Palimora</span>
+        </Link>
+        <span className="text-muted-foreground">/</span>
+        <h1 className="font-display font-semibold">Administration</h1>
         <div className="flex-1" />
-        <button className="text-sm text-slate-500" onClick={() => { setToken(null); navigate('/login') }}>
+        <Button variant="ghost" size="sm" asChild><Link to="/">← Station</Link></Button>
+        <Button variant="ghost" size="sm" onClick={() => { setToken(null); navigate('/login') }}>
           Déconnexion
-        </button>
+        </Button>
       </header>
 
       {stats && (
-        <div className="grid grid-cols-6 gap-3 p-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 p-4">
           {[
             ['Utilisateurs', stats.users], ['Documents', stats.documents],
             ['Pages totales', stats.pages_total], ['Pages OK', stats.pages_done],
             ['Pages en erreur', stats.pages_error], ['Crédits en circulation', stats.credits_in_circulation],
           ].map(([label, value]) => (
-            <div key={label as string} className="bg-white rounded-lg border p-3">
-              <p className="text-xs text-slate-500">{label}</p>
-              <p className="text-2xl font-semibold">{value}</p>
+            <div key={label as string} className="bg-card rounded-lg border p-3">
+              <p className="text-xs text-muted-foreground">{label}</p>
+              <p className="font-display text-2xl font-semibold">{value}</p>
             </div>
           ))}
         </div>
       )}
 
       <div className="px-4 pb-8">
-        <table className="w-full bg-white rounded-lg border text-sm">
-          <thead>
-            <tr className="text-left text-slate-500 border-b">
-              <th className="p-2">Email</th><th className="p-2">Nom</th>
-              <th className="p-2">Crédits</th><th className="p-2">Rôle</th>
-              <th className="p-2">Statut</th><th className="p-2">Créditer</th>
-              <th className="p-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id} className="border-b">
-                <td className="p-2">{u.email}</td>
-                <td className="p-2">{u.display_name}</td>
-                <td className="p-2 font-semibold">{u.credit_balance}</td>
-                <td className="p-2">{u.is_admin ? 'admin' : 'user'}</td>
-                <td className="p-2">
-                  <button onClick={() => toggleActive(u.id)}
-                          className={u.is_active ? 'text-emerald-600' : 'text-red-600'}>
-                    {u.is_active ? 'actif' : 'désactivé'}
-                  </button>
-                </td>
-                <td className="p-2">
-                  <div className="flex gap-1">
-                    <input className="w-20 border rounded px-2 py-1"
-                           value={grant[u.id] || ''} placeholder="±N"
-                           onChange={(e) => setGrant({ ...grant, [u.id]: e.target.value })} />
-                    <button className="bg-indigo-600 text-white rounded px-2"
-                            onClick={() => addCredits(u.id)}>OK</button>
-                  </div>
-                </td>
-                <td className="p-2">
-                  {!u.is_admin && (
-                    <button className="text-indigo-600 disabled:opacity-50"
-                            disabled={impersonating} onClick={() => impersonate(u)}>
-                      Impersoner
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="bg-card rounded-lg border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Email</TableHead><TableHead>Nom</TableHead>
+                <TableHead>Crédits</TableHead><TableHead>Rôle</TableHead>
+                <TableHead>Statut</TableHead><TableHead>Créditer</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {users.map((u) => (
+                <TableRow key={u.id}>
+                  <TableCell>{u.email}</TableCell>
+                  <TableCell>{u.display_name}</TableCell>
+                  <TableCell className="font-semibold">{u.credit_balance}</TableCell>
+                  <TableCell>
+                    <Badge variant={u.is_admin ? 'default' : 'outline'}>
+                      {u.is_admin ? 'admin' : 'user'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Button size="xs" variant={u.is_active ? 'ghost' : 'destructive'}
+                            onClick={() => toggleActive(u.id)}>
+                      {u.is_active ? 'actif' : 'désactivé'}
+                    </Button>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex gap-1">
+                      <Input className="w-20 h-7" value={grant[u.id] || ''} placeholder="±N"
+                             onChange={(e) => setGrant({ ...grant, [u.id]: e.target.value })} />
+                      <Button size="sm" onClick={() => addCredits(u.id)}>OK</Button>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {!u.is_admin && (
+                      <Button size="xs" variant="outline"
+                              disabled={impersonating} onClick={() => impersonate(u)}>
+                        Impersoner
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       <div className="px-4 pb-12">
-        <h2 className="mb-2 font-semibold">Journal d'impersonation</h2>
-        <table className="w-full bg-white rounded-lg border text-sm">
-          <thead>
-            <tr className="text-left text-slate-500 border-b">
-              <th className="p-2">Date</th><th className="p-2">Admin</th>
-              <th className="p-2">Cible</th><th className="p-2">Événement</th>
-              <th className="p-2">Méthode</th><th className="p-2">Chemin</th>
-              <th className="p-2">Statut</th>
-            </tr>
-          </thead>
-          <tbody>
-            {audit.map((r) => (
-              <tr key={r.id} className="border-b">
-                <td className="p-2">{r.created_at ? new Date(r.created_at).toLocaleString('fr-FR') : ''}</td>
-                <td className="p-2">{r.actor_email}</td>
-                <td className="p-2">{r.target_email}</td>
-                <td className="p-2">{r.event}</td>
-                <td className="p-2">{r.method}</td>
-                <td className="p-2 font-mono text-xs">{r.path}</td>
-                <td className="p-2">{r.status_code}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <h2 className="mb-2 font-display font-semibold">Journal d'impersonation</h2>
+        <div className="bg-card rounded-lg border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead><TableHead>Admin</TableHead>
+                <TableHead>Cible</TableHead><TableHead>Événement</TableHead>
+                <TableHead>Méthode</TableHead><TableHead>Chemin</TableHead>
+                <TableHead>Statut</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {audit.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{r.created_at ? new Date(r.created_at).toLocaleString('fr-FR') : ''}</TableCell>
+                  <TableCell>{r.actor_email}</TableCell>
+                  <TableCell>{r.target_email}</TableCell>
+                  <TableCell>{r.event}</TableCell>
+                  <TableCell>{r.method}</TableCell>
+                  <TableCell className="font-mono text-xs">{r.path}</TableCell>
+                  <TableCell>{r.status_code}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       {ocr && (
         <div className="px-4 pb-12">
-          <h2 className="mb-2 font-semibold">OCR / Modèles</h2>
+          <h2 className="mb-2 font-display font-semibold">OCR / Modèles</h2>
 
           {ocr.models.length === 0 ? (
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-muted-foreground">
               Aucun modèle alternatif configuré (env <code>KRAKEN_MODELS</code>).
             </p>
           ) : (
             <div className="mb-4 flex items-center gap-2 text-sm">
-              <select className="border rounded px-2 py-1"
-                      value={effectiveKey} onChange={(e) => setModelKey(e.target.value)}>
+              {/* Native select on purpose: the shadcn/Radix Select renders a
+                  listbox in a portal, which the OCR panel's tests drive with
+                  selectOptions/toHaveValue. */}
+              <select
+                className="h-8 rounded-lg border border-input bg-card px-2 text-sm
+                           outline-none focus-visible:border-ring focus-visible:ring-3
+                           focus-visible:ring-ring/50"
+                value={effectiveKey} onChange={(e) => setModelKey(e.target.value)}>
                 {effectiveKey === '' && <option value="" disabled>— défaut Kraken —</option>}
                 {ocr.models.map((m) => <option key={m.key} value={m.key}>{m.key}</option>)}
               </select>
-              <button className="bg-indigo-600 text-white rounded px-3 py-1 disabled:opacity-50"
-                      disabled={savingModel || effectiveKey === ''} onClick={saveModel}>
+              <Button disabled={savingModel || effectiveKey === ''} onClick={saveModel}>
                 Enregistrer
-              </button>
-              <span className="text-xs text-slate-500">source&nbsp;: {ocr.active_source}</span>
+              </Button>
+              <span className="text-xs text-muted-foreground">source&nbsp;: {ocr.active_source}</span>
             </div>
           )}
 
-          <table className="w-full bg-white rounded-lg border text-sm mb-6">
-            <thead><tr className="text-left text-slate-500 border-b">
-              <th className="p-2">Modèle</th><th className="p-2">Pages</th>
-              <th className="p-2">Erreurs</th>
-              <th className="p-2">Médiane (s)</th><th className="p-2">p95 (s)</th>
-              <th className="p-2">Confiance moy.</th>
-            </tr></thead>
-            <tbody>
-              {ocr.aggregates.map((a) => (
-                <tr key={a.model_key || '—'} className="border-b">
-                  <td className="p-2">{a.model_key || '—'}</td>
-                  <td className="p-2">{a.pages}</td>
-                  <td className="p-2">{a.errors}</td>
-                  <td className="p-2">{a.median_s ?? '—'}</td>
-                  <td className="p-2">{a.p95_s ?? '—'}</td>
-                  <td className="p-2">{a.avg_confidence ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="bg-card rounded-lg border overflow-hidden mb-6">
+            <Table>
+              <TableHeader><TableRow>
+                <TableHead>Modèle</TableHead><TableHead>Pages</TableHead>
+                <TableHead>Erreurs</TableHead>
+                <TableHead>Médiane (s)</TableHead><TableHead>p95 (s)</TableHead>
+                <TableHead>Confiance moy.</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
+                {ocr.aggregates.map((a) => (
+                  <TableRow key={a.model_key || '—'}>
+                    <TableCell>{a.model_key || '—'}</TableCell>
+                    <TableCell>{a.pages}</TableCell>
+                    <TableCell>{a.errors}</TableCell>
+                    <TableCell>{a.median_s ?? '—'}</TableCell>
+                    <TableCell>{a.p95_s ?? '—'}</TableCell>
+                    <TableCell>{a.avg_confidence ?? '—'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
 
-          <table className="w-full bg-white rounded-lg border text-sm">
-            <thead><tr className="text-left text-slate-500 border-b">
-              <th className="p-2">Date</th><th className="p-2">Document</th>
-              <th className="p-2">Statut</th><th className="p-2">Durée (s)</th>
-              <th className="p-2">Durée/page (s)</th><th className="p-2">Modèle</th>
-              <th className="p-2">Confiance</th>
-            </tr></thead>
-            <tbody>
-              {ocr.recent.map((r) => (
-                <tr key={r.page_id} className="border-b">
-                  <td className="p-2">{r.submitted_at ? new Date(r.submitted_at).toLocaleString('fr-FR') : '—'}</td>
-                  <td className="p-2">{r.document_title}</td>
-                  <td className="p-2">{r.processing_status}</td>
-                  <td className="p-2">{r.duration_s ?? '—'}</td>
-                  <td className="p-2">{r.per_page_s ?? '—'}</td>
-                  <td className="p-2">{r.model_key || '—'}</td>
-                  <td className="p-2">{r.avg_confidence ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="bg-card rounded-lg border overflow-hidden">
+            <Table>
+              <TableHeader><TableRow>
+                <TableHead>Date</TableHead><TableHead>Document</TableHead>
+                <TableHead>Statut</TableHead><TableHead>Durée (s)</TableHead>
+                <TableHead>Durée/page (s)</TableHead><TableHead>Modèle</TableHead>
+                <TableHead>Confiance</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
+                {ocr.recent.map((r) => (
+                  <TableRow key={r.page_id}>
+                    <TableCell>
+                      {r.submitted_at ? new Date(r.submitted_at).toLocaleString('fr-FR') : '—'}
+                    </TableCell>
+                    <TableCell>{r.document_title}</TableCell>
+                    <TableCell>{r.processing_status}</TableCell>
+                    <TableCell>{r.duration_s ?? '—'}</TableCell>
+                    <TableCell>{r.per_page_s ?? '—'}</TableCell>
+                    <TableCell>{r.model_key || '—'}</TableCell>
+                    <TableCell>{r.avg_confidence ?? '—'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </div>
       )}
 
       {toast && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm rounded-lg px-4 py-2">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-foreground text-background
+                        text-sm rounded-lg px-4 py-2 shadow-lg">
           {toast}
         </div>
       )}
