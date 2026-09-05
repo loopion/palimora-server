@@ -103,3 +103,75 @@ def test_panel_survives_a_kraken_outage(client, db, kstub):
 def test_panel_requires_admin(client, db, kstub):
     u = make_user(db, email="u@test.fr")
     assert client.get("/api/admin/ocr", headers=auth_headers(db, u)).status_code == 403
+
+
+def test_catalog_proxies_repo_with_params(client, db, kstub):
+    admin = _admin(db)
+    kstub.routes[("GET", "/repo")] = (200, CATALOG)
+    r = client.get("/api/admin/ocr/catalog?script=Grek&all=false",
+                   headers=auth_headers(db, admin))
+    assert r.status_code == 200
+    assert r.json() == CATALOG
+    proxied = [c for c in kstub.calls if c["path"] == "/repo"][0]
+    assert proxied["method"] == "GET"
+    assert proxied["params"] == {"script": "Grek", "all": "false"}
+
+
+def test_catalog_defaults_to_latn(client, db, kstub):
+    admin = _admin(db)
+    kstub.routes[("GET", "/repo")] = (200, CATALOG)
+    client.get("/api/admin/ocr/catalog", headers=auth_headers(db, admin))
+    proxied = [c for c in kstub.calls if c["path"] == "/repo"][0]
+    assert proxied["params"] == {"script": "Latn", "all": "false"}
+
+
+def test_catalog_all_true_is_relayed(client, db, kstub):
+    admin = _admin(db)
+    kstub.routes[("GET", "/repo")] = (200, CATALOG)
+    client.get("/api/admin/ocr/catalog?all=true", headers=auth_headers(db, admin))
+    proxied = [c for c in kstub.calls if c["path"] == "/repo"][0]
+    assert proxied["params"]["all"] == "true"
+
+
+def test_catalog_502_when_kraken_is_down(client, db, kstub):
+    admin = _admin(db)
+    kstub.routes[("GET", "/repo")] = kraken.KrakenError("down")
+    r = client.get("/api/admin/ocr/catalog", headers=auth_headers(db, admin))
+    assert r.status_code == 502
+    assert r.json()["detail"] == "Service Kraken injoignable"
+
+
+def test_catalog_refresh_proxies_and_returns_202(client, db, kstub):
+    admin = _admin(db)
+    kstub.routes[("POST", "/repo/refresh")] = (202, {"job_id": "j-ref", "status": "started"})
+    r = client.post("/api/admin/ocr/catalog/refresh", headers=auth_headers(db, admin))
+    assert r.status_code == 202
+    assert r.json() == {"job_id": "j-ref", "status": "started"}
+    assert ("POST", "/repo/refresh") in {(c["method"], c["path"]) for c in kstub.calls}
+
+
+def test_job_status_is_proxied(client, db, kstub):
+    admin = _admin(db)
+    job = {"kind": "pull", "job_id": "j1", "status": "finished",
+           "doi": "10.5281/zenodo.1", "slug": "rec-1", "error": None, "progress": 100}
+    kstub.routes[("GET", "/models/jobs/j1")] = (200, job)
+    r = client.get("/api/admin/ocr/models/jobs/j1", headers=auth_headers(db, admin))
+    assert r.status_code == 200 and r.json() == job
+
+
+def test_unknown_job_404_is_relayed(client, db, kstub):
+    admin = _admin(db)
+    kstub.routes[("GET", "/models/jobs/nope")] = (404, {"detail": "Job introuvable"})
+    r = client.get("/api/admin/ocr/models/jobs/nope", headers=auth_headers(db, admin))
+    assert r.status_code == 404
+    assert r.json()["detail"] == "Job introuvable"
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/admin/ocr/catalog"),
+    ("POST", "/api/admin/ocr/catalog/refresh"),
+    ("GET", "/api/admin/ocr/models/jobs/j1"),
+])
+def test_catalog_routes_require_admin(client, db, kstub, method, path):
+    u = make_user(db, email="u@test.fr")
+    assert client.request(method, path, headers=auth_headers(db, u)).status_code == 403

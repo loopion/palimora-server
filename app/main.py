@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 
 import pypdf
-from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -1201,6 +1201,23 @@ def admin_ocr(db: Session = Depends(get_db), admin: User = Depends(get_admin_use
         "recent": recent,
         "aggregates": aggregates,
     }
+
+
+@app.get("/api/admin/ocr/catalog")
+def admin_ocr_catalog(script: str = "Latn", all_: bool = Query(False, alias="all"),
+                      admin: User = Depends(get_admin_user)):
+    return _kraken_proxy("GET", "/repo",
+                         params={"script": script, "all": "true" if all_ else "false"})
+
+
+@app.post("/api/admin/ocr/catalog/refresh", status_code=202)
+def admin_ocr_catalog_refresh(admin: User = Depends(get_admin_user)):
+    return _kraken_proxy("POST", "/repo/refresh")
+
+
+@app.get("/api/admin/ocr/models/jobs/{job_id}")
+def admin_ocr_model_job(job_id: str, admin: User = Depends(get_admin_user)):
+    return _kraken_proxy("GET", f"/models/jobs/{job_id}")
 
 
 @app.put("/api/admin/ocr/model")
