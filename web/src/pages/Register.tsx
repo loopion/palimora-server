@@ -22,7 +22,7 @@ export default function Register() {
         email, password, display_name: name,
       })
       setToken(data.token)
-      navigate('/')
+      navigate('/station')
     } catch (err: any) {
       setError(err.message)
     } finally {
