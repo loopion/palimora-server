@@ -121,7 +121,7 @@ export default function Admin() {
 
   useEffect(() => {
     api.get('/api/auth/me')
-      .then((me: any) => { if (!me.is_admin) navigate('/') })
+      .then((me: any) => { if (!me.is_admin) navigate('/station') })
       .catch(() => navigate('/login'))
     refresh()
   }, [refresh, navigate])
@@ -257,14 +257,14 @@ export default function Admin() {
   return (
     <div className="min-h-screen">
       <header className="bg-card border-b px-4 py-2.5 flex items-center gap-3">
-        <Link to="/" className="flex items-center gap-2">
+        <Link to="/station" className="flex items-center gap-2">
           <Mark size={24} />
           <span className="font-display font-semibold">Palimora</span>
         </Link>
         <span className="text-muted-foreground">/</span>
         <h1 className="font-display font-semibold">Administration</h1>
         <div className="flex-1" />
-        <Button variant="ghost" size="sm" asChild><Link to="/">← Station</Link></Button>
+        <Button variant="ghost" size="sm" asChild><Link to="/station">← Station</Link></Button>
         <Button variant="ghost" size="sm" onClick={() => { setToken(null); navigate('/login') }}>
           Déconnexion
         </Button>

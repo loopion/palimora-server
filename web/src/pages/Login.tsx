@@ -21,7 +21,7 @@ export default function Login() {
         email, password, device_name: 'web',
       })
       setToken(data.token)
-      navigate('/')
+      navigate('/station')
     } catch (err: any) {
       setError(err.message)
     } finally {

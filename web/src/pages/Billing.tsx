@@ -111,7 +111,7 @@ export default function Billing() {
   return (
     <div className="max-w-3xl mx-auto p-6">
       <div className="flex items-center gap-3 mb-4">
-        <Link to="/" className="text-sm text-muted-foreground hover:text-foreground">← Station</Link>
+        <Link to="/station" className="text-sm text-muted-foreground hover:text-foreground">← Station</Link>
         <h1 className="font-display text-xl font-semibold">Crédits</h1>
         <Badge variant="secondary">{status.credit_balance} crédits</Badge>
       </div>
