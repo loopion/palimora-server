@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import Mark from './Mark'
+import Mark from '../Mark'
 import { ROUTE_PAIRS, useT, type Locale } from '../../i18n'
 
 export default function PublicNav({ locale, authed }: { locale: Locale; authed: boolean }) {
