@@ -317,6 +317,23 @@ it('sorting by size puts unknown sizes last in both directions', async () => {
   ])
 })
 
+it('tag filters are OR-combined and clear back to the full list', async () => {
+  render(<MemoryRouter><Admin /></MemoryRouter>)
+  await openCatalog()
+  expect(cardOrder()).toHaveLength(3)
+
+  await userEvent.click(screen.getByRole('button', { name: 'french' }))
+  expect(cardOrder()).toEqual(['10.5281/zenodo.21788409'])
+  expect(screen.getByRole('button', { name: 'french' })).toHaveAttribute('aria-pressed', 'true')
+
+  await userEvent.click(screen.getByRole('button', { name: 'arabic' }))
+  expect(cardOrder()).toEqual(['10.5281/zenodo.111', '10.5281/zenodo.21788409'])
+
+  await userEvent.click(screen.getByRole('button', { name: 'french' }))
+  await userEvent.click(screen.getByRole('button', { name: 'arabic' }))
+  expect(cardOrder()).toHaveLength(3)
+})
+
 it('still renders the console when /api/admin/ocr errors', async () => {
   stubFetch((url) => {
     if (url.endsWith('/api/admin/ocr')) return new Response('boom', { status: 500 })

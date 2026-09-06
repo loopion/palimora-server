@@ -92,13 +92,21 @@ export default function Admin() {
   const [pullJobs, setPullJobs] = useState<Record<string, ModelJob>>({})
   const [sortField, setSortField] = useState<SortField>('name')
   const [sortAsc, setSortAsc] = useState(true)
+  const [activeTags, setActiveTags] = useState<string[]>([])
   const navigate = useNavigate()
+
+  const catalogTags = useMemo(() => {
+    const seen = new Set<string>()
+    for (const m of catalog?.models || []) for (const k of m.keywords) seen.add(k)
+    return [...seen].sort((a, b) => a.localeCompare(b, 'fr'))
+  }, [catalog])
 
   const visibleCatalog = useMemo(() => {
     const dir = sortAsc ? 1 : -1
-    return [...(catalog?.models || [])].sort(
-      (a, b) => compareCatalog(a, b, sortField, dir) || a.doi.localeCompare(b.doi))
-  }, [catalog, sortField, sortAsc])
+    const kept = (catalog?.models || []).filter(
+      (m) => activeTags.length === 0 || m.keywords.some((k) => activeTags.includes(k)))
+    return kept.sort((a, b) => compareCatalog(a, b, sortField, dir) || a.doi.localeCompare(b.doi))
+  }, [catalog, sortField, sortAsc, activeTags])
 
   const refresh = useCallback(async () => {
     const [u, s, a] = await Promise.all([
@@ -176,6 +184,7 @@ export default function Admin() {
     const script = all ? catalogScript : value
     setCatalogAll(all)
     if (!all) setCatalogScript(value)
+    setActiveTags([])  // the tag universe belongs to the script being listed
     loadCatalog(script, all)
   }
 
@@ -540,6 +549,24 @@ export default function Admin() {
                     {sortAsc ? '↑ croissant' : '↓ décroissant'}
                   </Button>
                 </div>
+
+                {catalogTags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {catalogTags.map((tag) => {
+                      const on = activeTags.includes(tag)
+                      return (
+                        <Badge key={tag} asChild variant={on ? 'default' : 'outline'}>
+                          <button type="button" aria-pressed={on}
+                                  onClick={() => setActiveTags((prev) => on
+                                    ? prev.filter((t) => t !== tag)
+                                    : [...prev, tag])}>
+                            {tag}
+                          </button>
+                        </Badge>
+                      )
+                    })}
+                  </div>
+                )}
 
                 {catalogLoading && (
                   <p className="text-sm text-muted-foreground">Chargement du catalogue…</p>
