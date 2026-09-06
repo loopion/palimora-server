@@ -92,21 +92,16 @@ export default function Admin() {
   const [pullJobs, setPullJobs] = useState<Record<string, ModelJob>>({})
   const [sortField, setSortField] = useState<SortField>('name')
   const [sortAsc, setSortAsc] = useState(true)
-  const [activeTags, setActiveTags] = useState<string[]>([])
+  const [tagQuery, setTagQuery] = useState('')
   const navigate = useNavigate()
-
-  const catalogTags = useMemo(() => {
-    const seen = new Set<string>()
-    for (const m of catalog?.models || []) for (const k of m.keywords) seen.add(k)
-    return [...seen].sort((a, b) => a.localeCompare(b, 'fr'))
-  }, [catalog])
 
   const visibleCatalog = useMemo(() => {
     const dir = sortAsc ? 1 : -1
+    const q = tagQuery.trim().toLowerCase()
     const kept = (catalog?.models || []).filter(
-      (m) => activeTags.length === 0 || m.keywords.some((k) => activeTags.includes(k)))
+      (m) => q === '' || m.keywords.some((k) => k.toLowerCase().includes(q)))
     return kept.sort((a, b) => compareCatalog(a, b, sortField, dir) || a.doi.localeCompare(b.doi))
-  }, [catalog, sortField, sortAsc, activeTags])
+  }, [catalog, sortField, sortAsc, tagQuery])
 
   const refresh = useCallback(async () => {
     const [u, s, a] = await Promise.all([
@@ -184,7 +179,7 @@ export default function Admin() {
     const script = all ? catalogScript : value
     setCatalogAll(all)
     if (!all) setCatalogScript(value)
-    setActiveTags([])  // the tag universe belongs to the script being listed
+    setTagQuery('')  // the tag universe belongs to the script being listed
     loadCatalog(script, all)
   }
 
@@ -550,23 +545,9 @@ export default function Admin() {
                   </Button>
                 </div>
 
-                {catalogTags.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {catalogTags.map((tag) => {
-                      const on = activeTags.includes(tag)
-                      return (
-                        <Badge key={tag} asChild variant={on ? 'default' : 'outline'}>
-                          <button type="button" aria-pressed={on}
-                                  onClick={() => setActiveTags((prev) => on
-                                    ? prev.filter((t) => t !== tag)
-                                    : [...prev, tag])}>
-                            {tag}
-                          </button>
-                        </Badge>
-                      )
-                    })}
-                  </div>
-                )}
+                <Input type="search" placeholder="Filtrer par tag…" aria-label="Filtrer par tag"
+                       value={tagQuery} onChange={(e) => setTagQuery(e.target.value)}
+                       className="h-8 max-w-[16rem] text-sm" />
 
                 {catalogLoading && (
                   <p className="text-sm text-muted-foreground">Chargement du catalogue…</p>

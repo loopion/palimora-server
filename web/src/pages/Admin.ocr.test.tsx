@@ -317,20 +317,20 @@ it('sorting by size puts unknown sizes last in both directions', async () => {
   ])
 })
 
-it('tag filters are OR-combined and clear back to the full list', async () => {
+it('the tag search filters by substring, case-insensitively, and clears back to the full list', async () => {
   render(<MemoryRouter><Admin /></MemoryRouter>)
   await openCatalog()
   expect(cardOrder()).toHaveLength(3)
 
-  await userEvent.click(screen.getByRole('button', { name: 'french' }))
+  const search = screen.getByRole('searchbox', { name: /filtrer par tag/i })
+  await userEvent.type(search, 'FRE')
   expect(cardOrder()).toEqual(['10.5281/zenodo.21788409'])
-  expect(screen.getByRole('button', { name: 'french' })).toHaveAttribute('aria-pressed', 'true')
 
-  await userEvent.click(screen.getByRole('button', { name: 'arabic' }))
-  expect(cardOrder()).toEqual(['10.5281/zenodo.111', '10.5281/zenodo.21788409'])
+  await userEvent.clear(search)
+  await userEvent.type(search, 'arabic')
+  expect(cardOrder()).toEqual(['10.5281/zenodo.111'])
 
-  await userEvent.click(screen.getByRole('button', { name: 'french' }))
-  await userEvent.click(screen.getByRole('button', { name: 'arabic' }))
+  await userEvent.clear(search)
   expect(cardOrder()).toHaveLength(3)
 })
 
