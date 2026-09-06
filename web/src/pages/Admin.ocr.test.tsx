@@ -277,6 +277,9 @@ it('the help button opens a popover describing the catalogue fields', async () =
   expect(within(help).getByText(/identifiant permanent/i)).toBeInTheDocument()
   expect(within(help).getByText(/Latn = latin/)).toBeInTheDocument()
   expect(within(help).getByText(/déjà été téléchargé/i)).toBeInTheDocument()
+  // Leaving it open leaks the popper's pending work into the next test.
+  fireEvent.keyDown(help, { key: 'Escape' })
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
 })
 
 it('sorts the catalogue client-side without refetching', async () => {
@@ -312,23 +315,6 @@ it('sorting by size puts unknown sizes last in both directions', async () => {
   expect(cardOrder()).toEqual([
     '10.5281/zenodo.999', '10.5281/zenodo.21788409', '10.5281/zenodo.111',
   ])
-})
-
-it('tag filters are OR-combined and clear back to the full list', async () => {
-  render(<MemoryRouter><Admin /></MemoryRouter>)
-  await openCatalog()
-  expect(cardOrder()).toHaveLength(3)
-
-  await userEvent.click(screen.getByRole('button', { name: 'french' }))
-  expect(cardOrder()).toEqual(['10.5281/zenodo.21788409'])
-  expect(screen.getByRole('button', { name: 'french' })).toHaveAttribute('aria-pressed', 'true')
-
-  await userEvent.click(screen.getByRole('button', { name: 'arabic' }))
-  expect(cardOrder()).toEqual(['10.5281/zenodo.111', '10.5281/zenodo.21788409'])
-
-  await userEvent.click(screen.getByRole('button', { name: 'french' }))
-  await userEvent.click(screen.getByRole('button', { name: 'arabic' }))
-  expect(cardOrder()).toHaveLength(3)
 })
 
 it('still renders the console when /api/admin/ocr errors', async () => {

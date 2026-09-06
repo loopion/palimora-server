@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, setImpersonation, setToken } from '../api'
-import type { CatalogResponse, LocalModel, ModelJob, OcrPanelData } from '../api'
+import type { CatalogModel, CatalogResponse, LocalModel, ModelJob, OcrPanelData } from '../api'
 import Mark from '../components/Mark'
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
 import { Badge } from '../components/ui/badge'
@@ -40,6 +40,28 @@ const selectClass =
   'h-8 rounded-lg border border-input bg-card px-2 text-sm outline-none ' +
   'focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'
 
+type SortField = 'name' | 'doi' | 'script' | 'size'
+
+const SORT_LABELS: [SortField, string][] = [
+  ['name', 'Nom'], ['doi', 'DOI'], ['script', 'Écriture'], ['size', 'Taille'],
+]
+
+/** Entries with no value for the active field sit at the bottom in both directions. */
+const nullsLast = (a: unknown, b: unknown) => (a === null ? 1 : 0) - (b === null ? 1 : 0)
+
+function compareCatalog(a: CatalogModel, b: CatalogModel, field: SortField, dir: number): number {
+  if (field === 'size') {
+    if (a.size_bytes === null || b.size_bytes === null) return nullsLast(a.size_bytes, b.size_bytes)
+    return dir * (a.size_bytes - b.size_bytes)
+  }
+  const key = (m: CatalogModel) =>
+    field === 'doi' ? m.doi : field === 'script' ? m.script : m.summary || m.doi
+  const av = key(a)
+  const bv = key(b)
+  if (av === null || bv === null) return nullsLast(av, bv)
+  return dir * av.localeCompare(bv, 'fr')
+}
+
 async function pollJob(jobId: string, onTick: (j: ModelJob) => void): Promise<ModelJob> {
   for (;;) {
     const job = await api.get<ModelJob>(`/api/admin/ocr/models/jobs/${jobId}`)
@@ -68,7 +90,15 @@ export default function Admin() {
   const [catalogLoading, setCatalogLoading] = useState(false)
   const [refreshingCatalog, setRefreshingCatalog] = useState(false)
   const [pullJobs, setPullJobs] = useState<Record<string, ModelJob>>({})
+  const [sortField, setSortField] = useState<SortField>('name')
+  const [sortAsc, setSortAsc] = useState(true)
   const navigate = useNavigate()
+
+  const visibleCatalog = useMemo(() => {
+    const dir = sortAsc ? 1 : -1
+    return [...(catalog?.models || [])].sort(
+      (a, b) => compareCatalog(a, b, sortField, dir) || a.doi.localeCompare(b.doi))
+  }, [catalog, sortField, sortAsc])
 
   const refresh = useCallback(async () => {
     const [u, s, a] = await Promise.all([
@@ -496,12 +526,27 @@ export default function Admin() {
                   {catalog?.refreshing && <Badge variant="outline">en cours…</Badge>}
                 </div>
 
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <label className="sr-only" htmlFor="catalog-sort">Trier par</label>
+                  <select id="catalog-sort" aria-label="Trier par" className={selectClass}
+                          value={sortField}
+                          onChange={(e) => setSortField(e.target.value as SortField)}>
+                    {SORT_LABELS.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                  <Button size="sm" variant="outline" aria-label="Inverser l'ordre de tri"
+                          onClick={() => setSortAsc((v) => !v)}>
+                    {sortAsc ? '↑ croissant' : '↓ décroissant'}
+                  </Button>
+                </div>
+
                 {catalogLoading && (
                   <p className="text-sm text-muted-foreground">Chargement du catalogue…</p>
                 )}
 
                 <div className="grid gap-2 md:grid-cols-2">
-                  {(catalog?.models || []).map((m) => {
+                  {visibleCatalog.map((m) => {
                     const job = pullJobs[m.doi]
                     return (
                       <div key={m.doi} data-testid={`catalog-${m.doi}`}
