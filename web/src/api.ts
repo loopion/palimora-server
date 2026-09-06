@@ -204,6 +204,8 @@ export interface CatalogModel {
   keywords: string[]
   license: string | null
   already_local: boolean
+  // Emitted by kraken-ocr-service; null when the Zenodo record reports no file size.
+  size_bytes: number | null
 }
 export interface CatalogResponse {
   cached_at: string | null

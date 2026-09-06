@@ -13,6 +13,7 @@ import { Input } from '../components/ui/input'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../components/ui/table'
+import { formatBytes } from '../lib/utils'
 
 interface AdminUser {
   id: string; email: string; display_name: string
@@ -35,12 +36,6 @@ const JOB_POLL_MS = 3000
 const selectClass =
   'h-8 rounded-lg border border-input bg-card px-2 text-sm outline-none ' +
   'focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'
-
-function formatBytes(n: number): string {
-  if (!n) return '—'
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)} Ko`
-  return `${(n / (1024 * 1024)).toFixed(1)} Mo`
-}
 
 async function pollJob(jobId: string, onTick: (j: ModelJob) => void): Promise<ModelJob> {
   for (;;) {
@@ -472,6 +467,7 @@ export default function Admin() {
                            className="bg-card rounded-lg border p-3 space-y-1.5">
                         <p className="text-sm font-medium">{m.summary || m.doi}</p>
                         <p className="font-mono text-xs text-muted-foreground">{m.doi}</p>
+                        <p className="text-xs text-muted-foreground">{formatBytes(m.size_bytes)}</p>
                         <div className="flex flex-wrap gap-1">
                           {m.script && <Badge variant="outline">{m.script}</Badge>}
                           {m.keywords.map((k) => <Badge key={k} variant="outline">{k}</Badge>)}
