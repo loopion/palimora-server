@@ -41,7 +41,11 @@ export function AppRoutes() {
       <Route path="/station" element={<RequireAuth><Station /></RequireAuth>} />
       <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
       <Route path="/billing" element={<RequireAuth><Billing /></RequireAuth>} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      {/* Unknown paths are served the empty app shell, never a prerendered
+          file, so reading the token during render carries no hydration risk —
+          and it spares a signed-in user the homepage flash PublicLayout's
+          post-hydration redirect would otherwise cause. */}
+      <Route path="*" element={<Navigate to={getToken() ? '/station' : '/'} replace />} />
     </Routes>
   )
 }
