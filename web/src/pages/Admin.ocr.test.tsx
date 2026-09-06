@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import Admin from './Admin'
@@ -40,12 +40,28 @@ const catalogData = {
     {
       doi: '10.5281/zenodo.999', summary: 'Latin medieval', script: 'Latn',
       keywords: ['latin', 'medieval'], license: 'CC-BY-4.0', already_local: false,
+      size_bytes: 356515840,
     },
     {
       doi: '10.5281/zenodo.21788409', summary: 'French 18C cursive', script: 'Latn',
       keywords: ['french'], license: 'CC-BY-4.0', already_local: true,
+      size_bytes: 1258291,
+    },
+    {
+      doi: '10.5281/zenodo.111', summary: 'Arabic manuscripts', script: 'Arab',
+      keywords: ['arabic', 'medieval'], license: null, already_local: false,
+      size_bytes: null,
     },
   ],
+}
+
+/** DOIs of the catalogue cards, in rendered order. */
+const cardOrder = () =>
+  screen.getAllByTestId(/^catalog-/).map((el) => el.dataset.testid!.replace('catalog-', ''))
+
+async function openCatalog() {
+  await userEvent.click(await screen.findByRole('button', { name: /catalogue htrmopo/i }))
+  await screen.findByText('Latin medieval')
 }
 
 /** Base router: every non-OCR admin call succeeds; `over` patches specific paths. */
@@ -235,6 +251,87 @@ it('a kraken_error renders a banner and still shows the aggregates', async () =>
   expect(await screen.findByText(/gestion des modèles indisponible/i)).toBeInTheDocument()
   expect(screen.getByText('Doc A')).toBeInTheDocument()
   expect(screen.getByText('140')).toBeInTheDocument()  // p95 from the aggregates table
+})
+
+it('renders human-readable sizes in both the local table and the catalogue', async () => {
+  render(<MemoryRouter><Admin /></MemoryRouter>)
+  await screen.findByText(/Modèles téléchargés/i)
+  expect(within(screen.getByTestId('local-model-rec')).getByText('4.0 Mo')).toBeInTheDocument()
+  await openCatalog()
+  expect(within(screen.getByTestId('catalog-10.5281/zenodo.999'))
+    .getByText('340.0 Mo')).toBeInTheDocument()
+  expect(within(screen.getByTestId('catalog-10.5281/zenodo.21788409'))
+    .getByText('1.2 Mo')).toBeInTheDocument()
+  expect(within(screen.getByTestId('catalog-10.5281/zenodo.111'))
+    .getByText('taille inconnue')).toBeInTheDocument()
+})
+
+// Radix's popper settles very slowly under jsdom (~5s inside React's act), so this
+// case drives the trigger with fireEvent and asserts synchronously.
+it('the help button opens a popover describing the catalogue fields', async () => {
+  render(<MemoryRouter><Admin /></MemoryRouter>)
+  await openCatalog()
+  expect(screen.queryByText(/identifiant permanent/i)).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: /aide sur les champs/i }))
+  const help = screen.getByRole('dialog')
+  expect(within(help).getByText(/identifiant permanent/i)).toBeInTheDocument()
+  expect(within(help).getByText(/Latn = latin/)).toBeInTheDocument()
+  expect(within(help).getByText(/déjà été téléchargé/i)).toBeInTheDocument()
+  // Leaving it open leaks the popper's pending work into the next test.
+  fireEvent.keyDown(help, { key: 'Escape' })
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+})
+
+it('sorts the catalogue client-side without refetching', async () => {
+  render(<MemoryRouter><Admin /></MemoryRouter>)
+  await openCatalog()
+  const before = calls().length
+
+  // Default is name-ascending, not the order the API happened to return.
+  expect(cardOrder()).toEqual([
+    '10.5281/zenodo.111', '10.5281/zenodo.21788409', '10.5281/zenodo.999',
+  ])
+
+  await userEvent.click(screen.getByRole('button', { name: /inverser l'ordre/i }))
+  expect(cardOrder()).toEqual([
+    '10.5281/zenodo.999', '10.5281/zenodo.21788409', '10.5281/zenodo.111',
+  ])
+
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: /trier par/i }), 'script')
+  // Direction is sticky across a field change, so Arab now sorts last.
+  expect(cardOrder()[2]).toBe('10.5281/zenodo.111')
+
+  expect(calls().length).toBe(before)
+})
+
+it('sorting by size puts unknown sizes last in both directions', async () => {
+  render(<MemoryRouter><Admin /></MemoryRouter>)
+  await openCatalog()
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: /trier par/i }), 'size')
+  expect(cardOrder()).toEqual([
+    '10.5281/zenodo.21788409', '10.5281/zenodo.999', '10.5281/zenodo.111',
+  ])
+  await userEvent.click(screen.getByRole('button', { name: /inverser l'ordre/i }))
+  expect(cardOrder()).toEqual([
+    '10.5281/zenodo.999', '10.5281/zenodo.21788409', '10.5281/zenodo.111',
+  ])
+})
+
+it('tag filters are OR-combined and clear back to the full list', async () => {
+  render(<MemoryRouter><Admin /></MemoryRouter>)
+  await openCatalog()
+  expect(cardOrder()).toHaveLength(3)
+
+  await userEvent.click(screen.getByRole('button', { name: 'french' }))
+  expect(cardOrder()).toEqual(['10.5281/zenodo.21788409'])
+  expect(screen.getByRole('button', { name: 'french' })).toHaveAttribute('aria-pressed', 'true')
+
+  await userEvent.click(screen.getByRole('button', { name: 'arabic' }))
+  expect(cardOrder()).toEqual(['10.5281/zenodo.111', '10.5281/zenodo.21788409'])
+
+  await userEvent.click(screen.getByRole('button', { name: 'french' }))
+  await userEvent.click(screen.getByRole('button', { name: 'arabic' }))
+  expect(cardOrder()).toHaveLength(3)
 })
 
 it('still renders the console when /api/admin/ocr errors', async () => {

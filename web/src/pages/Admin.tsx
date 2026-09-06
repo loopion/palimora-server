@@ -1,18 +1,22 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, setImpersonation, setToken } from '../api'
-import type { CatalogResponse, LocalModel, ModelJob, OcrPanelData } from '../api'
+import type { CatalogModel, CatalogResponse, LocalModel, ModelJob, OcrPanelData } from '../api'
 import Mark from '../components/Mark'
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
 import { Badge } from '../components/ui/badge'
-import { Button } from '../components/ui/button'
+import { Button, buttonVariants } from '../components/ui/button'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
 import {
+  Popover, PopoverContent, PopoverTitle, PopoverTrigger,
+} from '../components/ui/popover'
+import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../components/ui/table'
+import { cn, formatBytes } from '../lib/utils'
 
 interface AdminUser {
   id: string; email: string; display_name: string
@@ -36,10 +40,26 @@ const selectClass =
   'h-8 rounded-lg border border-input bg-card px-2 text-sm outline-none ' +
   'focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'
 
-function formatBytes(n: number): string {
-  if (!n) return '—'
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)} Ko`
-  return `${(n / (1024 * 1024)).toFixed(1)} Mo`
+type SortField = 'name' | 'doi' | 'script' | 'size'
+
+const SORT_LABELS: [SortField, string][] = [
+  ['name', 'Nom'], ['doi', 'DOI'], ['script', 'Écriture'], ['size', 'Taille'],
+]
+
+/** Entries with no value for the active field sit at the bottom in both directions. */
+const nullsLast = (a: unknown, b: unknown) => (a === null ? 1 : 0) - (b === null ? 1 : 0)
+
+function compareCatalog(a: CatalogModel, b: CatalogModel, field: SortField, dir: number): number {
+  if (field === 'size') {
+    if (a.size_bytes === null || b.size_bytes === null) return nullsLast(a.size_bytes, b.size_bytes)
+    return dir * (a.size_bytes - b.size_bytes)
+  }
+  const key = (m: CatalogModel) =>
+    field === 'doi' ? m.doi : field === 'script' ? m.script : m.summary || m.doi
+  const av = key(a)
+  const bv = key(b)
+  if (av === null || bv === null) return nullsLast(av, bv)
+  return dir * av.localeCompare(bv, 'fr')
 }
 
 async function pollJob(jobId: string, onTick: (j: ModelJob) => void): Promise<ModelJob> {
@@ -70,7 +90,23 @@ export default function Admin() {
   const [catalogLoading, setCatalogLoading] = useState(false)
   const [refreshingCatalog, setRefreshingCatalog] = useState(false)
   const [pullJobs, setPullJobs] = useState<Record<string, ModelJob>>({})
+  const [sortField, setSortField] = useState<SortField>('name')
+  const [sortAsc, setSortAsc] = useState(true)
+  const [activeTags, setActiveTags] = useState<string[]>([])
   const navigate = useNavigate()
+
+  const catalogTags = useMemo(() => {
+    const seen = new Set<string>()
+    for (const m of catalog?.models || []) for (const k of m.keywords) seen.add(k)
+    return [...seen].sort((a, b) => a.localeCompare(b, 'fr'))
+  }, [catalog])
+
+  const visibleCatalog = useMemo(() => {
+    const dir = sortAsc ? 1 : -1
+    const kept = (catalog?.models || []).filter(
+      (m) => activeTags.length === 0 || m.keywords.some((k) => activeTags.includes(k)))
+    return kept.sort((a, b) => compareCatalog(a, b, sortField, dir) || a.doi.localeCompare(b.doi))
+  }, [catalog, sortField, sortAsc, activeTags])
 
   const refresh = useCallback(async () => {
     const [u, s, a] = await Promise.all([
@@ -148,6 +184,7 @@ export default function Admin() {
     const script = all ? catalogScript : value
     setCatalogAll(all)
     if (!all) setCatalogScript(value)
+    setActiveTags([])  // the tag universe belongs to the script being listed
     loadCatalog(script, all)
   }
 
@@ -432,10 +469,48 @@ export default function Admin() {
 
           {/* ── Block 3 — Catalogue HTRMoPo (lazy) ─────────────────────── */}
           <section className="space-y-2">
-            <Button variant="ghost" size="sm" onClick={toggleCatalog}
-                    aria-expanded={catalogOpen}>
-              {catalogOpen ? '▾' : '▸'} Catalogue HTRMoPo
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="sm" onClick={toggleCatalog}
+                      aria-expanded={catalogOpen}>
+                {catalogOpen ? '▾' : '▸'} Catalogue HTRMoPo
+              </Button>
+              <Popover>
+                {/* Styled directly rather than via <Button asChild>: Button is not
+                    forwardRef, and Radix needs the trigger ref to place the popover. */}
+                <PopoverTrigger
+                  className={cn(buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
+                                'rounded-full')}
+                  aria-label="Aide sur les champs du catalogue">
+                  ?
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-96">
+                  <PopoverTitle>Champs du catalogue</PopoverTitle>
+                  <ul className="space-y-1.5 text-xs text-muted-foreground">
+                    <li>
+                      DOI — identifiant permanent du dépôt Zenodo qui héberge le modèle.
+                    </li>
+                    <li>
+                      Écriture — système d'écriture que le modèle sait lire
+                      (Latn = latin, Grek = grec, Arab = arabe, Cyrl = cyrillique…).
+                    </li>
+                    <li>
+                      Licence — conditions de réutilisation publiées par l'auteur du modèle.
+                    </li>
+                    <li>
+                      Mots-clés — étiquettes libres du dépôt (langue, période, type d'écriture).
+                      Cliquez-les sous ce bloc pour filtrer la liste.
+                    </li>
+                    <li>
+                      Taille — poids du fichier modèle à télécharger sur le volume Kraken.
+                    </li>
+                    <li>
+                      Déjà local — le modèle a déjà été téléchargé sur le serveur Kraken&nbsp;;
+                      il est sélectionnable comme modèle actif.
+                    </li>
+                  </ul>
+                </PopoverContent>
+              </Popover>
+            </div>
 
             {catalogOpen && (
               <div className="space-y-3">
@@ -460,18 +535,52 @@ export default function Admin() {
                   {catalog?.refreshing && <Badge variant="outline">en cours…</Badge>}
                 </div>
 
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <label className="sr-only" htmlFor="catalog-sort">Trier par</label>
+                  <select id="catalog-sort" aria-label="Trier par" className={selectClass}
+                          value={sortField}
+                          onChange={(e) => setSortField(e.target.value as SortField)}>
+                    {SORT_LABELS.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                  <Button size="sm" variant="outline" aria-label="Inverser l'ordre de tri"
+                          onClick={() => setSortAsc((v) => !v)}>
+                    {sortAsc ? '↑ croissant' : '↓ décroissant'}
+                  </Button>
+                </div>
+
+                {catalogTags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {catalogTags.map((tag) => {
+                      const on = activeTags.includes(tag)
+                      return (
+                        <Badge key={tag} asChild variant={on ? 'default' : 'outline'}>
+                          <button type="button" aria-pressed={on}
+                                  onClick={() => setActiveTags((prev) => on
+                                    ? prev.filter((t) => t !== tag)
+                                    : [...prev, tag])}>
+                            {tag}
+                          </button>
+                        </Badge>
+                      )
+                    })}
+                  </div>
+                )}
+
                 {catalogLoading && (
                   <p className="text-sm text-muted-foreground">Chargement du catalogue…</p>
                 )}
 
                 <div className="grid gap-2 md:grid-cols-2">
-                  {(catalog?.models || []).map((m) => {
+                  {visibleCatalog.map((m) => {
                     const job = pullJobs[m.doi]
                     return (
                       <div key={m.doi} data-testid={`catalog-${m.doi}`}
                            className="bg-card rounded-lg border p-3 space-y-1.5">
                         <p className="text-sm font-medium">{m.summary || m.doi}</p>
                         <p className="font-mono text-xs text-muted-foreground">{m.doi}</p>
+                        <p className="text-xs text-muted-foreground">{formatBytes(m.size_bytes)}</p>
                         <div className="flex flex-wrap gap-1">
                           {m.script && <Badge variant="outline">{m.script}</Badge>}
                           {m.keywords.map((k) => <Badge key={k} variant="outline">{k}</Badge>)}
