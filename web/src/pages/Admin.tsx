@@ -5,15 +5,18 @@ import type { CatalogResponse, LocalModel, ModelJob, OcrPanelData } from '../api
 import Mark from '../components/Mark'
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
 import { Badge } from '../components/ui/badge'
-import { Button } from '../components/ui/button'
+import { Button, buttonVariants } from '../components/ui/button'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
 import {
+  Popover, PopoverContent, PopoverTitle, PopoverTrigger,
+} from '../components/ui/popover'
+import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../components/ui/table'
-import { formatBytes } from '../lib/utils'
+import { cn, formatBytes } from '../lib/utils'
 
 interface AdminUser {
   id: string; email: string; display_name: string
@@ -427,10 +430,48 @@ export default function Admin() {
 
           {/* ── Block 3 — Catalogue HTRMoPo (lazy) ─────────────────────── */}
           <section className="space-y-2">
-            <Button variant="ghost" size="sm" onClick={toggleCatalog}
-                    aria-expanded={catalogOpen}>
-              {catalogOpen ? '▾' : '▸'} Catalogue HTRMoPo
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="sm" onClick={toggleCatalog}
+                      aria-expanded={catalogOpen}>
+                {catalogOpen ? '▾' : '▸'} Catalogue HTRMoPo
+              </Button>
+              <Popover>
+                {/* Styled directly rather than via <Button asChild>: Button is not
+                    forwardRef, and Radix needs the trigger ref to place the popover. */}
+                <PopoverTrigger
+                  className={cn(buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
+                                'rounded-full')}
+                  aria-label="Aide sur les champs du catalogue">
+                  ?
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-96">
+                  <PopoverTitle>Champs du catalogue</PopoverTitle>
+                  <ul className="space-y-1.5 text-xs text-muted-foreground">
+                    <li>
+                      DOI — identifiant permanent du dépôt Zenodo qui héberge le modèle.
+                    </li>
+                    <li>
+                      Écriture — système d'écriture que le modèle sait lire
+                      (Latn = latin, Grek = grec, Arab = arabe, Cyrl = cyrillique…).
+                    </li>
+                    <li>
+                      Licence — conditions de réutilisation publiées par l'auteur du modèle.
+                    </li>
+                    <li>
+                      Mots-clés — étiquettes libres du dépôt (langue, période, type d'écriture).
+                      Cliquez-les sous ce bloc pour filtrer la liste.
+                    </li>
+                    <li>
+                      Taille — poids du fichier modèle à télécharger sur le volume Kraken.
+                    </li>
+                    <li>
+                      Déjà local — le modèle a déjà été téléchargé sur le serveur Kraken&nbsp;;
+                      il est sélectionnable comme modèle actif.
+                    </li>
+                  </ul>
+                </PopoverContent>
+              </Popover>
+            </div>
 
             {catalogOpen && (
               <div className="space-y-3">

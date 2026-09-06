@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import Admin from './Admin'
@@ -266,14 +266,16 @@ it('renders human-readable sizes in both the local table and the catalogue', asy
     .getByText('taille inconnue')).toBeInTheDocument()
 })
 
+// Radix's popper settles very slowly under jsdom (~5s inside React's act), so this
+// case drives the trigger with fireEvent and asserts synchronously.
 it('the help button opens a popover describing the catalogue fields', async () => {
   render(<MemoryRouter><Admin /></MemoryRouter>)
   await openCatalog()
   expect(screen.queryByText(/identifiant permanent/i)).toBeNull()
-  await userEvent.click(screen.getByRole('button', { name: /aide sur les champs/i }))
-  const help = await screen.findByRole('dialog')
+  fireEvent.click(screen.getByRole('button', { name: /aide sur les champs/i }))
+  const help = screen.getByRole('dialog')
   expect(within(help).getByText(/identifiant permanent/i)).toBeInTheDocument()
-  expect(within(help).getByText(/Latn/)).toBeInTheDocument()
+  expect(within(help).getByText(/Latn = latin/)).toBeInTheDocument()
   expect(within(help).getByText(/déjà été téléchargé/i)).toBeInTheDocument()
 })
 
