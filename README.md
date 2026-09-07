@@ -41,3 +41,12 @@ see `web/scripts/prerender.mjs`. Interim domain:
 `https://home.palimora.pays.fr.eu.org` (set as a Coolify domain alias on
 the existing app; will move to `https://palimora.fr` once registered).
 Design spec: `docs/superpowers/specs/2026-09-04-d-homepage-design.md`.
+
+## Two-host split (home. / app.)
+
+The same container serves the vitrine on `home.` and the Station on `app.`:
+
+| Var | Notes |
+| --- | --- |
+| `PALIMORA_APP_HOST` | runtime; e.g. `app.palimora.pays.fr.eu.org`. When the request `Host` matches, `GET /` 302-redirects to `/station` instead of serving the vitrine |
+| `VITE_STATION_URL` | build-time; e.g. `https://app.palimora.pays.fr.eu.org`. When set, the vitrine's "Station / login / register" links become absolute so a visitor on `home.` lands on `app.` |
