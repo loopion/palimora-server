@@ -14,6 +14,9 @@ class Settings:
     app_name: str = "Palimora Server"
     secret_key: str = os.getenv("SECRET_KEY", "dev-secret-change-me")
     base_url: str = os.getenv("BASE_URL", "http://localhost:8000")
+    # Host that serves the app (Station). When the request Host matches this,
+    # GET / redirects to /station instead of serving the public vitrine.
+    app_host: str = os.getenv("PALIMORA_APP_HOST", "")
 
     # Database
     database_url: str = os.getenv(

@@ -1,8 +1,8 @@
 import os
 
 import pytest
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.testclient import TestClient
 
 # These tests build a small, self-contained FastAPI app that registers a
@@ -20,11 +20,15 @@ from fastapi.testclient import TestClient
 # (app.html) if present, else the plain index.html.
 
 
-def _make_app(static_dir: str) -> FastAPI:
+def _make_app(static_dir: str, app_host: str = "") -> FastAPI:
     app = FastAPI()
 
     @app.get("/{full_path:path}")
-    def spa(full_path: str):
+    def spa(full_path: str, request: Request):
+        if full_path == "" and app_host:
+            host = request.headers.get("host", "").split(":")[0].lower()
+            if host == app_host.strip().lower():
+                return RedirectResponse("/station", status_code=302)
         target = os.path.join(static_dir, full_path)
         if full_path and os.path.isfile(target):
             return FileResponse(target)
@@ -113,6 +117,34 @@ def test_root_path_serves_prerendered_homepage_not_app_shell(tmp_path):
     assert resp.status_code == 200
     assert "manuscrits ont une histoire" in resp.text
     assert 'data-prerendered-path="/"' in resp.text
+
+
+def test_root_on_app_host_redirects_to_station(tmp_path):
+    static_dir = str(tmp_path)
+    _write(static_dir, "index.html", "<html><body>homepage</body></html>")
+    client = TestClient(_make_app(static_dir, app_host="app.example"))
+    resp = client.get("/", headers={"host": "app.example"}, follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/station"
+
+
+def test_root_on_vitrine_host_serves_homepage(tmp_path):
+    static_dir = str(tmp_path)
+    _write(static_dir, "index.html", "<html><body>homepage</body></html>")
+    client = TestClient(_make_app(static_dir, app_host="app.example"))
+    resp = client.get("/", headers={"host": "home.example"}, follow_redirects=False)
+    assert resp.status_code == 200
+    assert "homepage" in resp.text
+
+
+def test_root_redirect_disabled_when_app_host_unset(tmp_path):
+    static_dir = str(tmp_path)
+    _write(static_dir, "index.html", "<html><body>homepage</body></html>")
+    client = TestClient(_make_app(static_dir))
+    for host in ("app.example", "home.example"):
+        resp = client.get("/", headers={"host": host}, follow_redirects=False)
+        assert resp.status_code == 200
+        assert "homepage" in resp.text
 
 
 def test_app_only_path_falls_back_to_root_index_without_app_shell(tmp_path):
