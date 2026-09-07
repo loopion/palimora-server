@@ -751,6 +751,12 @@ def reocr_page(page_id: str, db: Session = Depends(get_db),
                user: User = Depends(get_current_user)):
     page = _own_page(db, user, page_id)
     doc = page.document
+    if not page.storage_key or (
+        settings.storage_backend == "s3" and not storage.object_exists(page.storage_key)
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="Fichier source introuvable dans le stockage — ré-importez la page.")
     if page.content_type.startswith("application/pdf"):
         busy = db.query(Page).filter(
             Page.document_id == doc.id,
