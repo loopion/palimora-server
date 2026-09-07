@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { getToken } from '../../api'
 import { localeFromPath } from '../../i18n'
+import { stationHref } from '../../lib/urls'
 import PublicNav from './PublicNav'
 import PublicFooter from './PublicFooter'
 
@@ -18,6 +19,12 @@ export default function PublicLayout({ children }: { children?: React.ReactNode 
 
   const isHomepage = pathname === '/' || pathname === '/en'
   if (isHomepage && authed) {
+    // On the vitrine host (home.), the Station lives on another origin, so
+    // a client-router redirect cannot reach it — do a full-page navigation.
+    if (import.meta.env.VITE_STATION_URL) {
+      window.location.replace(stationHref('/station'))
+      return null
+    }
     return <Navigate to="/station" replace />
   }
 

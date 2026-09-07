@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import Mark from '../Mark'
+import StationLink from './StationLink'
 import { ROUTE_PAIRS, useT, type Locale } from '../../i18n'
 
 export default function PublicNav({ locale, authed }: { locale: Locale; authed: boolean }) {
@@ -30,8 +31,8 @@ export default function PublicNav({ locale, authed }: { locale: Locale; authed: 
           >
             {t('common.nav.lang_toggle')}
           </Link>
-          <Link
-            to={authed ? '/station' : '/register'}
+          <StationLink
+            path={authed ? '/station' : '/register'}
             className="rounded-md px-4 py-2 font-medium"
             style={{
               background: 'var(--color-accent)',
@@ -40,7 +41,7 @@ export default function PublicNav({ locale, authed }: { locale: Locale; authed: 
             }}
           >
             {authed ? t('common.nav.cta_open_app') : t('common.nav.cta_signup')}
-          </Link>
+          </StationLink>
         </div>
       </nav>
     </header>

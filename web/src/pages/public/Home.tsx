@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { localeFromPath, useT } from '../../i18n'
+import StationLink from '../../components/public/StationLink'
 
 export default function Home() {
   const { pathname } = useLocation()
@@ -25,13 +26,13 @@ export default function Home() {
         </p>
         <div className="mt-8 flex flex-wrap items-start gap-x-4 gap-y-2">
           <div>
-            <Link
-              to={registerPath}
+            <StationLink
+              path={registerPath}
               className="inline-block rounded-md px-6 py-3 font-medium"
               style={{ background: 'var(--color-accent)', color: 'var(--color-accent-ink)', borderRadius: 'var(--radius-md)' }}
             >
               {t('home.hero.cta_primary')}
-            </Link>
+            </StationLink>
             <p className="mt-2 text-sm" style={{ color: 'var(--color-ink-soft)' }}>{t('home.hero.cta_primary_note')}</p>
           </div>
           <a
@@ -120,13 +121,13 @@ export default function Home() {
         <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-2xl)', color: 'var(--color-ink)' }}>
           {t('home.closing.title')}
         </h2>
-        <Link
-          to={registerPath}
+        <StationLink
+          path={registerPath}
           className="mt-6 inline-block rounded-md px-6 py-3 font-medium"
           style={{ background: 'var(--color-accent)', color: 'var(--color-accent-ink)', borderRadius: 'var(--radius-md)' }}
         >
           {t('home.closing.cta')}
-        </Link>
+        </StationLink>
       </section>
     </>
   )

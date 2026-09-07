@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { api, BillingPack } from '../../api'
 import { localeFromPath, useT } from '../../i18n'
+import StationLink from '../../components/public/StationLink'
 
 export default function Pricing() {
   const { pathname } = useLocation()
@@ -79,13 +80,13 @@ export default function Pricing() {
         </dl>
       </section>
 
-      <Link
-        to="/register"
+      <StationLink
+        path="/register"
         className="mt-16 inline-block rounded-md px-6 py-3 font-medium"
         style={{ background: 'var(--color-accent)', color: 'var(--color-accent-ink)', borderRadius: 'var(--radius-md)' }}
       >
         {t('pricing.cta')}
-      </Link>
+      </StationLink>
     </div>
   )
 }
