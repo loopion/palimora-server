@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pypdf
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func
@@ -1397,7 +1397,12 @@ if os.path.isdir(STATIC_DIR) and os.path.exists(os.path.join(STATIC_DIR, "index.
     app.mount("/assets", StaticFiles(directory=os.path.join(STATIC_DIR, "assets")), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
-    def spa(full_path: str):
+    def spa(full_path: str, request: Request):
+        # On the app host, the root path is the Station, not the vitrine.
+        if full_path == "" and settings.app_host:
+            host = request.headers.get("host", "").split(":")[0].lower()
+            if host == settings.app_host.strip().lower():
+                return RedirectResponse("/station", status_code=302)
         target = os.path.join(STATIC_DIR, full_path)
         if full_path and os.path.isfile(target):
             return FileResponse(target)
