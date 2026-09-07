@@ -583,6 +583,14 @@ def finalize_document(document_id: str, payload: FinalizeIn,
         raise HTTPException(status_code=400,
                             detail="Aucune page à traiter (déjà en file ou traitée — utilisez ré-OCR)")
 
+    if settings.storage_backend == "s3" and any(
+        not p.storage_key or not storage.object_exists(p.storage_key) for p in ordered
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Le transfert d'au moins un fichier vers le stockage a échoué — "
+                   "ré-importez la ou les pages concernées.")
+
     # PDF: expand to one page row per PDF page (same storage_key, once)
     pdf_pages = [p for p in ordered if p.content_type == "application/pdf"]
     if pdf_pages:

@@ -169,6 +169,26 @@ def test_reocr_404_when_s3_source_missing(client, db, monkeypatch):
     assert db.query(Document).get(doc.id).user.credit_balance == 100  # not charged
 
 
+def test_finalize_422_when_s3_upload_missing(client, db, monkeypatch):
+    u = make_user(db, email="f@test.fr", credits=100)
+    doc = Document(user_id=u.id, title="D")
+    db.add(doc)
+    db.commit()
+    page = Page(document_id=doc.id, page_number=1, content_type="image/png",
+                storage_key=f"k/{doc.id}.png", processing_status="idle")
+    db.add(page)
+    db.commit()
+    monkeypatch.setattr(settings, "storage_backend", "s3")
+    monkeypatch.setattr(storage, "object_exists", lambda key: False)
+
+    r = client.post(f"/api/documents/{doc.id}/finalize",
+                    json={"page_ids": [page.id]}, headers=auth_headers(db, u))
+    assert r.status_code == 422
+    db.expire_all()
+    assert db.query(Page).get(page.id).processing_status == "idle"  # not queued
+    assert db.query(Document).get(doc.id).user.credit_balance == 100  # not charged
+
+
 def test_failed_ocr_still_stamps_timing_and_refunds(client, db, monkeypatch):
     _, pages = _make_page(db)
     page_id = pages[0].id
