@@ -6,6 +6,9 @@ import Mark from '../components/Mark'
 import { usePrompt } from '../components/PromptModal'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 
@@ -42,6 +45,7 @@ export default function Station() {
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null)
   const [busy, setBusy] = useState('')
   const [toast, setToast] = useState('')
+  const [confirmDel, setConfirmDel] = useState(false)
   const { prompt: showPrompt, node: promptNode } = usePrompt()
   const [searchQuery, setSearchQuery] = useState('')
   const [searchHits, setSearchHits] = useState<SearchHit[] | null>(null)
@@ -264,6 +268,21 @@ export default function Station() {
       await api.post(`/api/pages/${pageId}/reocr`)
       notify('Ré-OCR lancé')
       await loadPage(pageId!)
+      refreshQueue()
+    } catch (err: any) { notify(err.message) } finally { setBusy('') }
+  }
+
+  async function deletePage() {
+    if (!pageId || !docId) return
+    setBusy('delete')
+    try {
+      await api.delete(`/api/pages/${pageId}`)
+      setConfirmDel(false)
+      notify('Scan supprimé')
+      setPage(null)
+      setPageId(null)
+      const remaining = await loadPages(docId)
+      if (remaining.length) await loadPage(remaining[0].id)
       refreshQueue()
     } catch (err: any) { notify(err.message) } finally { setBusy('') }
   }
@@ -513,6 +532,11 @@ export default function Station() {
                   <Button size="sm" variant="secondary" onClick={reocr} disabled={busy === 'reocr'}>
                     ↻ Ré-OCR
                   </Button>
+                  <Button size="sm" variant="ghost"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => setConfirmDel(true)} disabled={busy === 'delete'}>
+                    🗑 Supprimer
+                  </Button>
                   <div className="flex-1" />
                   <Button size="sm" variant="outline" onClick={validatePage}>
                     ✓ Valider la page (V)
@@ -554,6 +578,24 @@ export default function Station() {
         </div>
       )}
       {promptNode}
+
+      <Dialog open={confirmDel} onOpenChange={(o) => { if (!o) setConfirmDel(false) }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-display">Supprimer ce scan</DialogTitle>
+            <DialogDescription>
+              La page {page?.page_number} et sa transcription seront supprimées
+              définitivement. Le fichier d’origine est également retiré du stockage.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmDel(false)}>Annuler</Button>
+            <Button variant="destructive" disabled={busy === 'delete'} onClick={deletePage}>
+              {busy === 'delete' ? 'Suppression…' : 'Supprimer'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

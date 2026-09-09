@@ -746,6 +746,42 @@ def get_page(page_id: str, db: Session = Depends(get_db),
     }
 
 
+@app.delete("/api/pages/{page_id}")
+def delete_page(page_id: str, db: Session = Depends(get_db),
+                user: User = Depends(get_current_user)):
+    page = _own_page(db, user, page_id)
+    if page.processing_status in ("queued", "transcribing"):
+        raise HTTPException(status_code=409,
+                            detail="Page en cours de traitement — réessayez ensuite.")
+    doc = page.document
+    key, dnum = page.storage_key, page.page_number
+
+    # PDF pages share one storage_key: drop the original only when no sibling row keeps it.
+    other_on_key = db.query(Page).filter(
+        Page.document_id == doc.id, Page.storage_key == key, Page.id != page.id
+    ).count() if key else 0
+    if page.derivative_key:
+        storage.delete_object(page.derivative_key)
+    if key and other_on_key == 0:
+        storage.delete_object(key)
+
+    db.query(PageJob).filter_by(page_id=page.id).delete()
+    db.query(AISuggestion).filter_by(page_id=page.id).delete()
+    db.delete(page)  # cascades transcriptions + segments
+    db.flush()
+
+    for p in db.query(Page).filter(
+        Page.document_id == doc.id, Page.page_number > dnum
+    ).all():
+        p.page_number -= 1
+
+    remaining = db.query(Page).filter_by(document_id=doc.id).count()
+    if remaining == 0:
+        doc.status = "draft"
+    db.commit()
+    return {"ok": True, "remaining": remaining}
+
+
 @app.post("/api/pages/{page_id}/reocr")
 def reocr_page(page_id: str, db: Session = Depends(get_db),
                user: User = Depends(get_current_user)):
