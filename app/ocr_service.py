@@ -108,6 +108,10 @@ def run_ocr_job(payload: dict) -> dict:
             # flagged + its credits refunded.
             page = db.query(Page).filter_by(id=page_id).one()
             document = db.query(Document).filter_by(id=page.document_id).one()
+            if settings.storage_backend == "s3" and not storage.object_exists(page.storage_key):
+                raise RuntimeError(
+                    "Fichier source introuvable dans le stockage objet — "
+                    "l'import de cette page a probablement échoué. Ré-importez la page.")
             if page.content_type.startswith("application/pdf"):
                 _run_pdf(db, page, document, payload)
             else:

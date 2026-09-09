@@ -583,6 +583,14 @@ def finalize_document(document_id: str, payload: FinalizeIn,
         raise HTTPException(status_code=400,
                             detail="Aucune page à traiter (déjà en file ou traitée — utilisez ré-OCR)")
 
+    if settings.storage_backend == "s3" and any(
+        not p.storage_key or not storage.object_exists(p.storage_key) for p in ordered
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Le transfert d'au moins un fichier vers le stockage a échoué — "
+                   "ré-importez la ou les pages concernées.")
+
     # PDF: expand to one page row per PDF page (same storage_key, once)
     pdf_pages = [p for p in ordered if p.content_type == "application/pdf"]
     if pdf_pages:
@@ -751,6 +759,12 @@ def reocr_page(page_id: str, db: Session = Depends(get_db),
                user: User = Depends(get_current_user)):
     page = _own_page(db, user, page_id)
     doc = page.document
+    if not page.storage_key or (
+        settings.storage_backend == "s3" and not storage.object_exists(page.storage_key)
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="Fichier source introuvable dans le stockage — ré-importez la page.")
     if page.content_type.startswith("application/pdf"):
         busy = db.query(Page).filter(
             Page.document_id == doc.id,

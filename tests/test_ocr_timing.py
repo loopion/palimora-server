@@ -1,9 +1,10 @@
 import httpx
 import pytest
 
-from app import kraken, ocr_models, ocr_service
+from app import kraken, ocr_models, ocr_service, storage
+from app.config import settings
 from app.models import AppSetting, Document, Page
-from tests.conftest import make_user
+from tests.conftest import auth_headers, make_user
 
 _MODELS = [
     {"slug": "rec", "protected": True, "doi": None, "summary": "", "script": None,
@@ -122,6 +123,70 @@ def test_pdf_ocr_stamps_all_siblings_with_batch_size(client, db, monkeypatch):
         assert p.ocr_submitted_at is not None and p.ocr_finished_at is not None
         assert p.ocr_batch_size == 3
         assert p.ocr_model_key == "rec-21788409"
+
+
+def test_ocr_fails_cleanly_when_s3_source_missing(client, db, monkeypatch):
+    """s3 backend + object absent from the bucket → clean error + refund, no
+    boto HeadObject 404 escaping into the failure path."""
+    _, pages = _make_page(db)
+    page_id = pages[0].id
+    monkeypatch.setattr(settings, "storage_backend", "s3")
+    monkeypatch.setattr(storage, "object_exists", lambda key: False)
+    called = {"submit": False}
+    monkeypatch.setattr(kraken, "submit_ocr",
+                        lambda *a, **k: called.__setitem__("submit", True) or "j")
+
+    out = ocr_service.run_ocr_job({
+        "page_id": page_id, "kind": "image", "model_key": "rec-21788409",
+        "seg_model_path": None, "rec_model_path": "/models/rec-21788409.mlmodel",
+    })
+    assert out["ok"] is False
+    assert "introuvable" in out["error"]
+    assert called["submit"] is False
+    db.expire_all()
+    p = db.query(Page).get(page_id)
+    assert p.processing_status == "error"
+    assert p.credits_charged == 0
+
+
+def test_reocr_404_when_s3_source_missing(client, db, monkeypatch):
+    u = make_user(db, email="r@test.fr", credits=100)
+    doc = Document(user_id=u.id, title="D")
+    db.add(doc)
+    db.commit()
+    page = Page(document_id=doc.id, page_number=1, content_type="image/png",
+                storage_key=f"k/{doc.id}.png", processing_status="to_review")
+    db.add(page)
+    db.commit()
+    monkeypatch.setattr(settings, "storage_backend", "s3")
+    monkeypatch.setattr(storage, "object_exists", lambda key: False)
+
+    r = client.post(f"/api/pages/{page.id}/reocr", headers=auth_headers(db, u))
+    assert r.status_code == 404
+    assert "introuvable" in r.json()["detail"]
+    db.expire_all()
+    assert db.query(Page).get(page.id).processing_status == "to_review"  # not queued
+    assert db.query(Document).get(doc.id).user.credit_balance == 100  # not charged
+
+
+def test_finalize_422_when_s3_upload_missing(client, db, monkeypatch):
+    u = make_user(db, email="f@test.fr", credits=100)
+    doc = Document(user_id=u.id, title="D")
+    db.add(doc)
+    db.commit()
+    page = Page(document_id=doc.id, page_number=1, content_type="image/png",
+                storage_key=f"k/{doc.id}.png", processing_status="idle")
+    db.add(page)
+    db.commit()
+    monkeypatch.setattr(settings, "storage_backend", "s3")
+    monkeypatch.setattr(storage, "object_exists", lambda key: False)
+
+    r = client.post(f"/api/documents/{doc.id}/finalize",
+                    json={"page_ids": [page.id]}, headers=auth_headers(db, u))
+    assert r.status_code == 422
+    db.expire_all()
+    assert db.query(Page).get(page.id).processing_status == "idle"  # not queued
+    assert db.query(Document).get(doc.id).user.credit_balance == 100  # not charged
 
 
 def test_failed_ocr_still_stamps_timing_and_refunds(client, db, monkeypatch):
